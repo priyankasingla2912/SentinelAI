@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python environment files
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# FastAPI / Python temporary files
+*.log
+
+# SQLite database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Vercel
+.vercel/
+
+# TypeScript
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Temporary development scripts
+# Remove these lines if you decide to keep the scripts in GitHub
+# backend/find_fraud_sample.py
+# backend/get_fraud_sample.py
+
+# Large datasets
+datasets/raw/*.csv
+
+# Trained machine learning models
+models/*.pkl
