@@ -509,3 +509,31 @@ Potential future improvements include:
 ## Project Goal
 
 The long-term goal of SentinelAI is to evolve from a fraud prediction prototype into an intelligent fraud and risk intelligence platform that combines machine learning, explainable AI, knowledge retrieval, and intelligent workflow assistance.
+
+---
+
+## Application Screenshots
+
+### Dashboard
+
+The SentinelAI dashboard provides an overview of analyzed transactions, fraud detection metrics, and transaction risk distribution.
+
+![SentinelAI Dashboard](docs/images/dashboard.png)
+
+### Transaction Analyzer
+
+The Transaction Analyzer evaluates a transaction using the Random Forest model and provides fraud probability, risk classification, recommended action, and SHAP-based explanations.
+
+![SentinelAI Transaction Analyzer](docs/images/analyzer.png)
+
+### Transaction History
+
+The History page allows users to review previously analyzed transactions using risk and prediction filters.
+
+![SentinelAI Transaction History](docs/images/history.png)
+
+### Transaction Details
+
+The Transaction Details page provides an individual fraud analysis including fraud probability, prediction, risk level, recommended action, and SHAP risk factors.
+
+![SentinelAI Transaction Details](docs/images/transaction-details.png)
