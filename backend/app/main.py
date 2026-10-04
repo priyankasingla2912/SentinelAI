@@ -3,6 +3,7 @@ import json
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from pathlib import Path
 import pandas as pd
 import joblib
 import shap
@@ -43,8 +44,11 @@ app.add_middleware(
 # Load Saved Model
 # ==========================================
 
-MODEL_PATH = "../models/fraud_random_forest.pkl"
-THRESHOLD_PATH = "../models/threshold.txt"
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+MODEL_PATH = BASE_DIR / "models" / "fraud_random_forest.pkl"
+THRESHOLD_PATH = BASE_DIR / "models" / "threshold.txt"
 
 model = joblib.load(MODEL_PATH)
 
