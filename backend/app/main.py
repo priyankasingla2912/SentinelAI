@@ -1,8 +1,8 @@
 import json
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import pandas as pd
 import joblib
 import shap
@@ -70,7 +70,7 @@ print("SHAP Explainer created successfully!")
 
 class Transaction(BaseModel):
 
-    Time: float
+    Time: float = Field(..., ge=0)
 
     V1: float
     V2: float
@@ -101,7 +101,7 @@ class Transaction(BaseModel):
     V27: float
     V28: float
 
-    Amount: float
+    Amount: float = Field(..., ge=0)
 
 
 # ==========================================
@@ -133,7 +133,7 @@ def health():
 # ==========================================
 
 @app.get("/history")
-def history(limit: int = 20):
+def history(limit: int = Query(20, ge=1, le=100)):
     rows = get_predictions(limit)
 
     predictions = []
@@ -173,9 +173,10 @@ def prediction_details(prediction_id: int):
     row = get_prediction_by_id(prediction_id)
 
     if row is None:
-        return {
-            "error": "Transaction not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction not found"
+        )
 
     shap_factors = None
 
