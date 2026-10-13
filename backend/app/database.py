@@ -25,9 +25,6 @@ def create_prediction_table():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
-    # Add shap_factors to an existing database if the column
-    # does not already exist.
     cursor.execute("PRAGMA table_info(predictions)")
     columns = [column[1] for column in cursor.fetchall()]
 
@@ -37,8 +34,31 @@ def create_prediction_table():
             ADD COLUMN shap_factors TEXT
         """)
 
+    
     connection.commit()
     connection.close()
+    
+
+def create_fraud_cases_table():
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fraud_cases (
+            case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prediction_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'NEW',
+            analyst TEXT,
+            investigation_notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prediction_id) REFERENCES predictions(id)
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
 
 
 def save_prediction(
@@ -74,8 +94,173 @@ def save_prediction(
         json.dumps(shap_factors)
     ))
 
+    prediction_id= cursor.lastrowid
     connection.commit()
     connection.close()
+
+    return prediction_id
+
+
+
+def create_fraud_case(
+    prediction_id,
+    status="NEW",
+    analyst=None,
+    investigation_notes=None
+):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        INSERT INTO fraud_cases (
+            prediction_id,
+            status,
+            analyst,
+            investigation_notes
+        )
+        VALUES (?, ?, ?, ?)
+    """, (
+        prediction_id,
+        status,
+        analyst,
+        investigation_notes
+    ))
+
+    case_id = cursor.lastrowid
+
+    connection.commit()
+    connection.close()
+
+    return case_id
+
+def get_fraud_cases(limit=20):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT
+            case_id,
+            prediction_id,
+            status,
+            analyst,
+            investigation_notes,
+            created_at,
+            updated_at
+        FROM fraud_cases
+        ORDER BY case_id DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return rows
+
+def get_fraud_case_by_id(case_id):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT
+            case_id,
+            prediction_id,
+            status,
+            analyst,
+            investigation_notes,
+            created_at,
+            updated_at
+        FROM fraud_cases
+        WHERE case_id = ?
+    """, (case_id,))
+
+    row = cursor.fetchone()
+
+    connection.close()
+
+    return row
+
+
+def update_fraud_case(
+    case_id,
+    status=None,
+    analyst=None,
+    investigation_notes=None,
+    fields_to_update=None
+):
+    connection = get_connection()
+
+    try:
+        cursor = connection.cursor()
+
+        # Preserve backward compatibility for existing callers.
+        if fields_to_update is None:
+            fields_to_update = set()
+
+            if status is not None:
+                fields_to_update.add("status")
+
+            if analyst is not None:
+                fields_to_update.add("analyst")
+
+            if investigation_notes is not None:
+                fields_to_update.add("investigation_notes")
+
+        # Only allow updates to approved database columns.
+        allowed_columns = {
+            "status",
+            "analyst",
+            "investigation_notes"
+        }
+
+        fields_to_update = set(fields_to_update) & allowed_columns
+
+        values_by_column = {
+            "status": status,
+            "analyst": analyst,
+            "investigation_notes": investigation_notes
+        }
+
+        # If no fields were supplied, check whether the case exists.
+        if not fields_to_update:
+            cursor.execute(
+                "SELECT 1 FROM fraud_cases WHERE case_id = ?",
+                (case_id,)
+            )
+            return cursor.fetchone() is not None
+
+        assignments = []
+        values = []
+
+        for column in (
+            "status",
+            "analyst",
+            "investigation_notes"
+        ):
+            if column in fields_to_update:
+                assignments.append(f"{column} = ?")
+                values.append(values_by_column[column])
+
+        assignments.append("updated_at = CURRENT_TIMESTAMP")
+
+        sql = f"""
+            UPDATE fraud_cases
+            SET {", ".join(assignments)}
+            WHERE case_id = ?
+        """
+
+        values.append(case_id)
+
+        cursor.execute(sql, values)
+        updated_rows = cursor.rowcount
+
+        connection.commit()
+
+        return updated_rows > 0
+
+    finally:
+        connection.close()
+
 
 
 def get_predictions(limit=20):

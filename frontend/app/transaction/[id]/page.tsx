@@ -124,13 +124,24 @@ export default function TransactionDetailsPage() {
     <main className="min-h-screen bg-slate-950 p-10 text-white">
       <div className="mx-auto max-w-6xl">
 
-        {/* Back Button */}
-        <Link
-          href="/history"
-          className="mb-6 inline-block text-sm text-blue-400 hover:text-blue-300"
-        >
-          ← Back to History
-        </Link>
+        
+{/* Navigation Links */}
+<div className="mb-6 flex flex-wrap items-center gap-5">
+  <Link
+    href="/history"
+    className="inline-block text-sm text-blue-400 hover:text-blue-300"
+  >
+    ← Back to History
+  </Link>
+
+  <Link
+    href="/cases"
+    className="inline-block text-sm text-blue-400 hover:text-blue-300"
+  >
+    View Fraud Cases →
+  </Link>
+</div>
+
 
         {/* Page Header */}
         <div className="mb-8">

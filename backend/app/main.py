@@ -12,7 +12,13 @@ from app.database import (
     get_predictions, 
     get_prediction_stats,
     create_prediction_table,
-    get_prediction_by_id
+    create_fraud_cases_table,
+    get_prediction_by_id,
+    get_fraud_cases,
+    get_fraud_case_by_id,
+    create_fraud_case,
+    update_fraud_case
+
 )
 
 app = FastAPI(
@@ -25,6 +31,7 @@ app = FastAPI(
 # ==========================================
 
 create_prediction_table()
+create_fraud_cases_table()
 # ==========================================
 # CORS Configuration
 # ==========================================
@@ -107,6 +114,19 @@ class Transaction(BaseModel):
 
     Amount: float = Field(..., ge=0)
 
+# Fraud Case Request Model
+# ==========================================
+
+class FraudCaseCreate(BaseModel):
+    prediction_id: int = Field(..., gt=0)
+    analyst: str | None = Field(default=None, max_length=100)
+    investigation_notes: str | None = Field(default=None, max_length=2000)
+
+
+class FraudCaseUpdate(BaseModel):
+    status: str | None = None
+    analyst: str | None = Field(default=None, max_length=100)
+    investigation_notes: str | None = Field(default=None, max_length=2000)
 
 # ==========================================
 # Home Endpoint
@@ -209,6 +229,154 @@ def prediction_details(prediction_id: int):
 def stats():
 
     return get_prediction_stats()
+
+
+# ==========================================
+
+# ==========================================
+# Fraud Case Management Endpoints
+# ==========================================
+
+@app.get("/cases")
+def list_fraud_cases(
+    limit: int = Query(20, ge=1, le=100)
+):
+    rows = get_fraud_cases(limit)
+
+    cases = []
+
+    for row in rows:
+        cases.append({
+            "case_id": row[0],
+            "prediction_id": row[1],
+            "status": row[2],
+            "analyst": row[3],
+            "investigation_notes": row[4],
+            "created_at": row[5],
+            "updated_at": row[6]
+        })
+
+    return {
+        "count": len(cases),
+        "cases": cases
+    }
+
+
+@app.get("/cases/{case_id}")
+def fraud_case_details(case_id: int):
+    row = get_fraud_case_by_id(case_id)
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Fraud case not found"
+        )
+
+    return {
+        "case_id": row[0],
+        "prediction_id": row[1],
+        "status": row[2],
+        "analyst": row[3],
+        "investigation_notes": row[4],
+        "created_at": row[5],
+        "updated_at": row[6]
+    }
+
+
+@app.post("/cases", status_code=201)
+def create_fraud_case_endpoint(case: FraudCaseCreate):
+    prediction = get_prediction_by_id(case.prediction_id)
+
+    if prediction is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction not found"
+        )
+
+    case_id = create_fraud_case(
+        prediction_id=case.prediction_id,
+        analyst=case.analyst,
+        investigation_notes=case.investigation_notes
+    )
+
+    row = get_fraud_case_by_id(case_id)
+
+    return {
+        "case_id": row[0],
+        "prediction_id": row[1],
+        "status": row[2],
+        "analyst": row[3],
+        "investigation_notes": row[4],
+        "created_at": row[5],
+        "updated_at": row[6]
+    }
+
+
+@app.put("/cases/{case_id}")
+def update_fraud_case_endpoint(
+    case_id: int,
+    case: FraudCaseUpdate
+):
+    existing_case = get_fraud_case_by_id(case_id)
+
+    if existing_case is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Fraud case not found"
+        )
+    fields = case.model_fields_set
+
+    allowed_statuses = {"NEW", "IN_PROGRESS", "RESOLVED"}
+
+    # Reject an explicitly null status.
+    if "status" in fields and case.status is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Status cannot be null."
+        )
+
+    # Validate and normalize status when supplied.
+    if case.status is not None:
+        normalized_status = case.status.strip().upper()
+
+        if normalized_status not in allowed_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid status. Use NEW, IN_PROGRESS, or RESOLVED."
+            )
+
+        case.status = normalized_status
+
+    # Update only the fields included in the request.
+    updated = update_fraud_case(
+        case_id=case_id,
+        status=case.status,
+        analyst=case.analyst,
+        investigation_notes=case.investigation_notes,
+        fields_to_update=fields
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail="Fraud case not found"
+        )
+
+    row = get_fraud_case_by_id(case_id)
+
+    return {
+        "case_id": row[0],
+        "prediction_id": row[1],
+        "status": row[2],
+        "analyst": row[3],
+        "investigation_notes": row[4],
+        "created_at": row[5],
+        "updated_at": row[6]
+    }
+
+
+
+
 # ==========================================
 # Risk Level
 # ==========================================
@@ -341,11 +509,11 @@ def predict(transaction: Transaction):
         )
 
 
-    # ==========================================
+     # ==========================================
     # Save Prediction to Database
     # ==========================================
 
-    save_prediction(
+    prediction_id = save_prediction(
         amount=transaction.Amount,
         fraud_probability=float(fraud_probability),
         threshold=THRESHOLD,
@@ -355,27 +523,35 @@ def predict(transaction: Transaction):
         shap_factors=top_factors
     )
 
+    # ==========================================
+    # Automatically Create Fraud Case
+    # ==========================================
+
+    case_id = None
+
+    if prediction == "FRAUD":
+        case_id = create_fraud_case(
+            prediction_id=prediction_id,
+            status="NEW",
+            analyst=None,
+            investigation_notes=(
+                "Automatically created after a fraud prediction. "
+                "Review the transaction and investigate."
+            )
+        )
 
     # ==========================================
     # Final API Response
     # ==========================================
 
     return {
-
+        "prediction_id": prediction_id,
+        "case_id": case_id,
         "amount": transaction.Amount,
-
-        "fraud_probability": round(
-            float(fraud_probability),
-            4
-        ),
-
+        "fraud_probability": round(float(fraud_probability), 4),
         "threshold": THRESHOLD,
-
         "prediction": prediction,
-
         "risk_level": risk_level,
-
         "top_risk_factors": top_factors,
-
         "recommended_action": recommended_action
     }
