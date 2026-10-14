@@ -1,11 +1,14 @@
+
 import sqlite3
 import json
+import os
 
-DATABASE_NAME = "sentinelai.db"
+DATABASE_NAME = os.getenv("DATABASE_PATH", "sentinelai.db")
 
 
 def get_connection():
     return sqlite3.connect(DATABASE_NAME)
+
 
 
 def create_prediction_table():

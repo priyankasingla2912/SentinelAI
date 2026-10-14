@@ -105,6 +105,22 @@ const fraudSample = {
   setError("");
 };
   const handleSubmit = async (event: React.FormEvent) => {
+
+  if (amount.trim() === "" || time.trim() === "") {
+    setError("Please enter both the transaction amount and transaction time.");
+    return;
+  }
+
+  if (
+    !Number.isFinite(Number(amount)) ||
+    Number(amount) < 0 ||
+    !Number.isFinite(Number(time)) ||
+    Number(time) < 0
+  ) {
+    setError("Please enter valid, non-negative numbers for amount and time.");
+    return;
+  }
+
   event.preventDefault();
 
   setLoading(true);
@@ -125,7 +141,7 @@ const fraudSample = {
     console.log("Sending transaction:",transactionData);
 
     const response = await fetch(
-      "http://127.0.0.1:8000/predict",
+      "http://127.0.0.1:8001/predict",
       {
         method: "POST",
         headers: {

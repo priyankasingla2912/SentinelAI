@@ -35,7 +35,7 @@ export default function TransactionDetailsPage() {
     const fetchTransaction = async () => {
       try {
         const response = await fetch(
-          `http://127.0.0.1:8000/history/${id}`
+          `http://127.0.0.1:8001/history/${id}`
         );
 
         if (!response.ok) {

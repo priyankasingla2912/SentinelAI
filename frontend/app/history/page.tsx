@@ -28,7 +28,7 @@ export default function HistoryPage() {
     const fetchHistory = async () => {
       try {
         const response = await fetch(
-          "http://127.0.0.1:8000/history?limit=50"
+          "http://127.0.0.1:8001/history?limit=50"
         );
 
         if (!response.ok) {

@@ -34,7 +34,7 @@ type FraudCase = {
   updated_at: string;
 };
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = "http://127.0.0.1:8001";
 
 const initialStats: DashboardStats = {
   total_transactions: 0,
@@ -53,6 +53,7 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState("Checking...");
   const [stats, setStats] = useState<DashboardStats>(initialStats);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [chartTransactions, setChartTransactions] = useState<TransactionRecord[]>([]);
   const [selectedRisk, setSelectedRisk] = useState("ALL");
   const [fraudCases, setFraudCases] = useState<FraudCase[]>([]);
   const [casesError, setCasesError] = useState("");
@@ -68,7 +69,7 @@ export default function Home() {
     try {
       const [statsResponse, historyResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/stats`),
-        fetch(`${API_BASE_URL}/history?limit=5`),
+        fetch(`${API_BASE_URL}/history?limit=100`),
       ]);
 
       if (!statsResponse.ok) {
@@ -84,7 +85,8 @@ export default function Home() {
         await historyResponse.json();
 
       setStats(statsData);
-      setTransactions(historyData.predictions);
+      setTransactions(historyData.predictions.slice(0, 5));
+      setChartTransactions(historyData.predictions);
       setApiStatus("Online");
     } catch (error) {
       console.error("Dashboard error:", error);
@@ -119,6 +121,33 @@ export default function Home() {
   useEffect(() => {
     void fetchDashboardData();
   }, [fetchDashboardData]);
+
+
+  const chartWidth = 760;
+  const chartHeight = 320;
+  const chartPadding = { top: 20, right: 25, bottom: 55, left: 65 };
+
+  const plotWidth = chartWidth - chartPadding.left - chartPadding.right;
+  const plotHeight = chartHeight - chartPadding.top - chartPadding.bottom;
+
+  const maxAmount = Math.max(
+    100,
+    ...chartTransactions.map((transaction) => transaction.amount)
+  );
+
+  const amountAxisMax = Math.ceil(maxAmount / 100) * 100;
+
+  const getPointX = (amount: number) =>
+    chartPadding.left + (amount / amountAxisMax) * plotWidth;
+
+  const getPointY = (probability: number) =>
+    chartPadding.top + (1 - probability) * plotHeight;
+
+  const fraudCount = chartTransactions.filter(
+    (transaction) => transaction.prediction === "FRAUD"
+  ).length;
+
+  const legitimateCount = chartTransactions.length - fraudCount;
 
   const filteredTransactions =
     selectedRisk === "ALL"
@@ -265,6 +294,167 @@ export default function Home() {
         </div>
 
         {/* Risk distribution and recent transactions */}
+
+        {/* Transaction Amount vs Fraud Probability */}
+        <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900 p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold">
+                Transaction Risk Analysis
+              </h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Transaction amount compared with predicted fraud probability
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-4 text-sm">
+              <span className="flex items-center gap-2 text-slate-300">
+                <span className="h-3 w-3 rounded-full bg-red-400" />
+                Fraud ({fraudCount})
+              </span>
+              <span className="flex items-center gap-2 text-slate-300">
+                <span className="h-3 w-3 rounded-full bg-green-400" />
+                Legitimate ({legitimateCount})
+              </span>
+            </div>
+          </div>
+
+          {chartTransactions.length === 0 ? (
+            <p className="py-12 text-center text-sm text-slate-400">
+              No transaction data available for the chart.
+            </p>
+          ) : (
+            <div className="mt-6 w-full overflow-x-auto">
+              <svg
+                viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                role="img"
+                aria-label="Scatter plot of transaction amount against fraud probability"
+                className="w-full min-w-[520px]"
+              >
+                {[0, 25, 50, 75, 100].map((value) => {
+                  const y = getPointY(value / 100);
+
+                  return (
+                    <g key={value}>
+                      <line
+                        x1={chartPadding.left}
+                        y1={y}
+                        x2={chartWidth - chartPadding.right}
+                        y2={y}
+                        stroke="#334155"
+                        strokeDasharray="4 4"
+                      />
+                      <text
+                        x={chartPadding.left - 12}
+                        y={y + 4}
+                        textAnchor="end"
+                        fill="#94a3b8"
+                        fontSize="12"
+                      >
+                        {value}%
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+                  const amount = amountAxisMax * fraction;
+                  const x = getPointX(amount);
+
+                  return (
+                    <g key={fraction}>
+                      <line
+                        x1={x}
+                        y1={chartPadding.top}
+                        x2={x}
+                        y2={chartHeight - chartPadding.bottom}
+                        stroke="#1e293b"
+                      />
+                      <text
+                        x={x}
+                        y={chartHeight - chartPadding.bottom + 22}
+                        textAnchor="middle"
+                        fill="#94a3b8"
+                        fontSize="12"
+                      >
+                        ${Math.round(amount)}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                <line
+                  x1={chartPadding.left}
+                  y1={chartPadding.top}
+                  x2={chartPadding.left}
+                  y2={chartHeight - chartPadding.bottom}
+                  stroke="#64748b"
+                />
+
+                <line
+                  x1={chartPadding.left}
+                  y1={chartHeight - chartPadding.bottom}
+                  x2={chartWidth - chartPadding.right}
+                  y2={chartHeight - chartPadding.bottom}
+                  stroke="#64748b"
+                />
+
+                <text
+                  x={chartPadding.left + plotWidth / 2}
+                  y={chartHeight - 8}
+                  textAnchor="middle"
+                  fill="#cbd5e1"
+                  fontSize="13"
+                >
+                  Transaction Amount ($)
+                </text>
+
+                <text
+                  transform={`translate(18 ${
+                    chartPadding.top + plotHeight / 2
+                  }) rotate(-90)`}
+                  textAnchor="middle"
+                  fill="#cbd5e1"
+                  fontSize="13"
+                >
+                  Fraud Probability
+                </text>
+
+                {chartTransactions.map((transaction) => (
+                  <circle
+                    key={transaction.id}
+                    cx={getPointX(transaction.amount)}
+                    cy={getPointY(transaction.fraud_probability)}
+                    r={5}
+                    fill={
+                      transaction.prediction === "FRAUD"
+                        ? "#f87171"
+                        : "#4ade80"
+                    }
+                    fillOpacity={0.85}
+                    stroke="#0f172a"
+                    strokeWidth={1}
+                  >
+                    <title>
+                      {`Transaction #${transaction.id} | Amount: $${transaction.amount.toFixed(
+                        2
+                      )} | Fraud probability: ${(
+                        transaction.fraud_probability * 100
+                      ).toFixed(1)}% | Prediction: ${transaction.prediction}`}
+                    </title>
+                  </circle>
+                ))}
+              </svg>
+            </div>
+          )}
+
+          <p className="mt-3 text-xs text-slate-500">
+            Each dot represents one saved prediction. Hover over a dot to see
+            its transaction details. The chart displays up to 100 recent
+            predictions.
+          </p>
+        </div>
+
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 lg:col-span-1">
             <h3 className="text-lg font-semibold">Risk Distribution</h3>
