@@ -243,18 +243,26 @@ The project evaluated multiple approaches:
 
 Random Forest was selected based on the evaluation results and its precision, recall, and F1-score trade-off.
 
-### Final Test Performance
+### Clean Holdout Evaluation
 
-Using the held-out test set, the selected Random Forest model achieved:
+The documented clean holdout evaluation in
+[`docs/model_evaluation.md`](docs/model_evaluation.md) reported the following
+results for the Random Forest model at the application's classification
+threshold of **0.60**:
 
 | Metric | Result |
 |---|---:|
-| Precision | **0.9302** |
-| Recall | **0.8163** |
-| F1 Score | **0.8696** |
-| ROC-AUC | **0.9679** |
+| Precision | **0.9494** |
+| Recall | **0.7653** |
+| F1 Score | **0.8475** |
+| ROC-AUC | **0.9613** |
+| Average Precision | **0.8670** |
 
-The fraud classification threshold of **0.60** was selected using validation data.
+These results describe the documented clean holdout experiment. The evaluation
+report also contains separate threshold-validation and cross-validation
+experiments; their results should not be conflated with this holdout evaluation.
+See the model evaluation report for the experiment configurations, threshold
+trade-offs, and limitations.
 
 ---
 
@@ -459,14 +467,22 @@ docs/Database_Design.md
 The FastAPI backend provides endpoints for:
 
 - Health checks
-- Transaction prediction
+- Transaction prediction (`POST /predict`)
+- Transaction investigation (`POST /investigate`)
 - Transaction history
 - Transaction statistics
 - Individual transaction details
 
+The investigation workflow provides a risk assessment, SHAP-based
+explanations, retrieved policy evidence, and a recommendation about whether
+human review is required. These capabilities support analysis and decision-making;
+they do not execute real banking or payment actions.
+
 For more information, see:
 
-docs/API_Documentation.md
+- [Architecture](docs/Architecture.md)
+- [Model Evaluation](docs/model_evaluation.md)
+- [API Documentation](docs/API_Documentation.md)
 
 ---
 
@@ -498,7 +514,6 @@ Potential future improvements include:
 - Automated model retraining
 - Real-time alerts
 - Integration with banking or payment systems
-- Advanced fraud investigation workflows
 - RAG-based compliance knowledge retrieval
 - Agentic AI fraud analyst assistance
 - Cloud deployment

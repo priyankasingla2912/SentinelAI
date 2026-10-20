@@ -135,9 +135,76 @@ export default function FraudCaseDetailsPage() {
     }
   }, [caseId]);
 
-  useEffect(() => {
-    void loadCase();
-  }, [loadCase]);
+
+useEffect(() => {
+  const controller = new AbortController();
+
+  async function fetchCase() {
+    if (!Number.isInteger(caseId) || caseId < 1) {
+      setError("Invalid case ID in the URL.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const caseResponse = await fetch(`${API_URL}/cases/${caseId}`, {
+        signal: controller.signal,
+      });
+      const caseData = await caseResponse.json();
+
+      if (!caseResponse.ok) {
+        throw new Error(
+          caseData.detail || "Unable to load this fraud case."
+        );
+      }
+
+      const loadedCase = caseData as FraudCase;
+
+      setFraudCase(loadedCase);
+      setStatus(loadedCase.status);
+      setAnalyst(loadedCase.analyst ?? "");
+      setNotes(loadedCase.investigation_notes ?? "");
+
+      const transactionResponse = await fetch(
+        `${API_URL}/history/${loadedCase.prediction_id}`,
+        { signal: controller.signal }
+      );
+      const transactionData = await transactionResponse.json();
+
+      if (!transactionResponse.ok) {
+        throw new Error(
+          transactionData.detail ||
+            "The case loaded, but its linked transaction could not be loaded."
+        );
+      }
+
+      setTransaction(transactionData as Transaction);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to SentinelAI."
+      );
+    } finally {
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
+    }
+  }
+
+  void fetchCase();
+
+  return () => controller.abort();
+}, [caseId]);
+
 
   async function saveCase() {
     if (!fraudCase) return;
@@ -501,7 +568,7 @@ export default function FraudCaseDetailsPage() {
                 SHAP values show how individual model features contributed to
                 this prediction. Positive values are displayed as increasing
                 fraud risk and negative values as lowering fraud risk,
-                following the existing transaction page's convention.
+                following the existing transaction page&apos;s convention.
               </p>
 
               {shapFactors.length > 0 ? (

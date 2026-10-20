@@ -1,0 +1,35 @@
+
+[
+  {
+    "id": "POL-001",
+    "title": "High-Risk Transaction Review",
+    "category": "risk_review",
+    "keywords": ["high risk", "critical", "fraud probability", "review"],
+    "content": "Transactions classified as high or critical risk should be prioritized for analyst review. The analyst should examine the transaction details, model probability, available explanation factors, and relevant account context before deciding on further action.",
+    "recommended_action": "Prioritize for human review."
+  },
+  {
+    "id": "POL-002",
+    "title": "Explainable Fraud Investigation",
+    "category": "explainability",
+    "keywords": ["shap", "explanation", "risk factors", "feature"],
+    "content": "Review the model's leading explanation factors to understand which input features influenced the prediction. Positive and negative SHAP values indicate direction relative to the model output being explained. Feature influence alone does not establish fraud or prove a transaction is legitimate.",
+    "recommended_action": "Review the explanation alongside other available evidence."
+  },
+  {
+    "id": "POL-003",
+    "title": "Suspicious Transaction Escalation",
+    "category": "escalation",
+    "keywords": ["suspicious", "escalation", "fraud case", "investigation"],
+    "content": "When a transaction is flagged as suspicious, document the model output and supporting evidence, create or update an investigation case, and assign it for appropriate analyst review. Record the reasons for the decision and any unresolved questions.",
+    "recommended_action": "Document evidence and route the case to an analyst."
+  },
+  {
+    "id": "POL-004",
+    "title": "Low-Risk Transaction Monitoring",
+    "category": "monitoring",
+    "keywords": ["low risk", "legitimate", "monitoring", "false negative"],
+    "content": "A low-risk model prediction does not guarantee that a transaction is legitimate. Follow applicable monitoring procedures and review additional evidence when available. Avoid treating the model score as the sole basis for a consequential decision.",
+    "recommended_action": "Continue applicable monitoring procedures."
+  }
+]

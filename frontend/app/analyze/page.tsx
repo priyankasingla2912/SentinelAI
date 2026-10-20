@@ -2,15 +2,61 @@
 
 import { useState } from "react";
 
+
+interface RiskFactor {
+  feature: string;
+  shap_value: number;
+}
+
+interface PredictionResult {
+  prediction_id: number;
+  case_id: number | null;
+  amount: number;
+  fraud_probability: number;
+  threshold: number;
+  prediction: string;
+  risk_level: string;
+  top_risk_factors: RiskFactor[];
+  recommended_action: string;
+}
+
+interface ModelEvidence {
+  feature?: string;
+  shap_value: number;
+}
+
+interface RetrievedPolicy {
+  id?: string | number;
+  title?: string;
+  category?: string;
+  content?: string;
+  recommended_action?: string;
+  matched_terms?: string[];
+}
+
+interface InvestigationResult {
+  assessment: string;
+  requires_human_review: boolean;
+  model_evidence: ModelEvidence[];
+  retrieved_policies: RetrievedPolicy[];
+  disclaimer?: string;
+}
+
+
 export default function AnalyzePage() {
   const [amount, setAmount] = useState("");
   const [time, setTime] = useState("");
   const [features, setFeatures] = useState<Record<string, string>>({});
   const [showAdvancedFeatures, setShowAdvancedFeatures] = useState(false);
 
-  const [result, setResult] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error,setError] = useState("");
+  const [result, setResult] = useState<PredictionResult | null>(null);
+const [loading, setLoading] = useState(false);
+const [error, setError] = useState("");
+
+const [investigation, setInvestigation] =
+  useState<InvestigationResult | null>(null);
+const [investigating, setInvestigating] = useState(false);
+const [investigationError, setInvestigationError] = useState("");
 
   const featureNames = Array.from({ length: 28 }, (_, i) => `V${i + 1}`);
   const legitimateSample = {
@@ -103,6 +149,8 @@ const fraudSample = {
   setFeatures(sampleFeatures);
   setResult(null);
   setError("");
+  setInvestigation(null);
+setInvestigationError("");
 };
   const handleSubmit = async (event: React.FormEvent) => {
 
@@ -126,6 +174,8 @@ const fraudSample = {
   setLoading(true);
   setError("");
   setResult(null);
+  setInvestigation(null);
+  setInvestigationError("");
 
   try {
     const transactionData = {
@@ -169,6 +219,58 @@ const fraudSample = {
 }
 };
 
+const handleInvestigate = async () => {
+  if (!result) {
+    setInvestigationError("Analyze a transaction first.");
+    return;
+  }
+
+  setInvestigating(true);
+  setInvestigationError("");
+  setInvestigation(null);
+
+  try {
+    const payload = {
+      prediction: result.prediction,
+      risk_level: result.risk_level,
+      fraud_probability: result.fraud_probability,
+      top_risk_factors: result.top_risk_factors ?? [],
+    };
+
+    const response = await fetch(
+      "http://127.0.0.1:8001/investigate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        typeof data.detail === "string"
+          ? data.detail
+          : "The investigation request failed."
+      );
+    }
+
+    setInvestigation(data);
+  } catch (err) {
+    console.error("Investigation error:", err);
+    setInvestigationError(
+      err instanceof Error
+        ? err.message
+        : "Unable to generate the investigation report."
+    );
+  } finally {
+    setInvestigating(false);
+  }
+};
+
   return (
     <main className="min-h-screen bg-slate-950 text-white p-10">
       <div className="mx-auto max-w-6xl">
@@ -197,7 +299,7 @@ const fraudSample = {
             <p className="mt-2 text-sm text-slate-400">
               Enter the basic transaction information below.
             </p>
-            
+
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">
 
@@ -482,7 +584,7 @@ const fraudSample = {
 
                 {result.top_risk_factors?.length > 0 ? (
                   result.top_risk_factors.map(
-                    (factor: any, index: number) => {
+                    (factor: RiskFactor, index: number) => {
 
                       const shapValue = Number(factor.shap_value);
                       const increasedRisk = shapValue > 0;
@@ -536,6 +638,200 @@ const fraudSample = {
               </div>
 
             </div>
+            {/* AI Investigation */}
+<div className="mt-6 rounded-lg border border-blue-500/30 bg-slate-950 p-5">
+  <h3 className="text-lg font-semibold">
+    AI Fraud Investigation
+  </h3>
+
+  <p className="mt-2 text-sm text-slate-400">
+    Generate an investigation report using model evidence
+    and the platform&apos;s sample fraud policies.
+  </p>
+
+  <button
+    type="button"
+    onClick={handleInvestigate}
+    disabled={investigating}
+    className="mt-4 rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    {investigating ? "Investigating..." : "Investigate Transaction"}
+  </button>
+
+  {investigationError && (
+    <p className="mt-4 text-sm text-red-400">
+      {investigationError}
+    </p>
+  )}
+
+  {investigation && (
+    <div className="mt-6 space-y-5">
+      <div>
+        <h4 className="font-semibold">Investigation Assessment</h4>
+        <p className="mt-2 text-slate-300">
+          {investigation.assessment}
+        </p>
+      </div>
+
+      <div>
+        <h4 className="font-semibold">Human Review Required</h4>
+        <p className="mt-2 text-slate-300">
+          {investigation.requires_human_review
+            ? "Yes — human review is required."
+            : "No — human review was not flagged by the system."}
+        </p>
+      </div>
+
+<div>
+  <h4 className="font-semibold">Model Evidence</h4>
+  <p className="mt-2 text-sm text-slate-400">
+    Features and their contributions to the model output.
+  </p>
+
+  {Array.isArray(investigation.model_evidence) &&
+  investigation.model_evidence.length > 0 ? (
+    <div className="mt-3 overflow-x-auto rounded-lg border border-slate-800">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-slate-900 text-slate-400">
+          <tr>
+            <th className="px-4 py-3">Feature</th>
+            <th className="px-4 py-3">SHAP Contribution</th>
+            <th className="px-4 py-3">Direction</th>
+          </tr>
+        </thead>
+        <tbody>
+          {investigation.model_evidence.map(
+            (item: ModelEvidence, index: number) => {
+              const value = Number(item.shap_value);
+              const positive = value > 0;
+
+              return (
+                <tr
+                  key={`${item.feature ?? "feature"}-${index}`}
+                  className="border-t border-slate-800"
+                >
+                  <td className="px-4 py-3 font-medium">
+                    {item.feature ?? "Unknown"}
+                  </td>
+                  <td className="px-4 py-3 font-mono">
+                    {Number.isFinite(value)
+                      ? value.toFixed(6)
+                      : "N/A"}
+                  </td>
+                  <td
+                    className={`px-4 py-3 ${
+                      positive
+                        ? "text-red-400"
+                        : value < 0
+                        ? "text-blue-400"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    {value > 0
+                      ? "Positive contribution"
+                      : value < 0
+                      ? "Negative contribution"
+                      : "No contribution"}
+                  </td>
+                </tr>
+              );
+            }
+          )}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-slate-900 p-4 text-sm text-slate-300">
+      {JSON.stringify(investigation.model_evidence, null, 2)}
+    </pre>
+  )}
+</div>
+
+
+
+
+<div>
+  <h4 className="text-lg font-semibold">Retrieved Sample Policies</h4>
+  <p className="mt-2 text-sm text-slate-400">
+    Sample development policies relevant to this investigation.
+  </p>
+
+  {Array.isArray(investigation.retrieved_policies) &&
+  investigation.retrieved_policies.length > 0 ? (
+    <div className="mt-4 space-y-4">
+      {investigation.retrieved_policies.map(
+        (policy: RetrievedPolicy, index: number) => (
+          <div
+            key={policy.id ?? index}
+            className="rounded-lg border border-slate-800 bg-slate-900 p-5"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-400">
+                  {policy.id ?? "Policy"}
+                </p>
+                <h5 className="mt-1 font-semibold text-white">
+                  {policy.title ?? "Untitled policy"}
+                </h5>
+              </div>
+
+              {policy.category && (
+                <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
+                  {policy.category}
+                </span>
+              )}
+            </div>
+
+            {policy.content && (
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                {policy.content}
+              </p>
+            )}
+
+            {policy.recommended_action && (
+              <div className="mt-4 rounded-md border border-blue-500/20 bg-blue-500/5 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-300">
+                  Recommended Action
+                </p>
+                <p className="mt-1 text-sm text-slate-200">
+                  {policy.recommended_action}
+                </p>
+              </div>
+            )}
+
+            {Array.isArray(policy.matched_terms) &&
+              policy.matched_terms.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {policy.matched_terms.map(
+                    (term: string, termIndex: number) => (
+                      <span
+                        key={`${term}-${termIndex}`}
+                        className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-400"
+                      >
+                        {term}
+                      </span>
+                    )
+                  )}
+                </div>
+              )}
+          </div>
+        )
+      )}
+    </div>
+  ) : (
+    <p className="mt-3 text-sm text-slate-400">
+      No sample policies were returned for this investigation.
+    </p>
+  )}
+</div>
+{investigation.disclaimer && (
+        <p className="border-t border-slate-800 pt-4 text-xs text-slate-500">
+          {investigation.disclaimer}
+        </p>
+      )}
+    </div>
+  )}
+</div>
 
           </div>
         )}

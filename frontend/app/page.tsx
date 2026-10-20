@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -59,6 +60,7 @@ export default function Home() {
   const [casesError, setCasesError] = useState("");
   const [dashboardError, setDashboardError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const router = useRouter();
 
   const fetchDashboardData = useCallback(async () => {
     setApiStatus("Checking...");
@@ -118,9 +120,87 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
-    void fetchDashboardData();
-  }, [fetchDashboardData]);
+
+useEffect(() => {
+  const controller = new AbortController();
+
+  async function loadInitialDashboard() {
+    setDashboardError("");
+    setIsRefreshing(true);
+
+    try {
+      const [statsResponse, historyResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/stats`, { signal: controller.signal }),
+        fetch(`${API_BASE_URL}/history?limit=100`, {
+          signal: controller.signal,
+        }),
+      ]);
+
+      if (!statsResponse.ok) {
+        throw new Error("Failed to fetch dashboard statistics");
+      }
+
+      if (!historyResponse.ok) {
+        throw new Error("Failed to fetch transaction history");
+      }
+
+      const statsData: DashboardStats = await statsResponse.json();
+      const historyData: {
+        count: number;
+        predictions: TransactionRecord[];
+      } = await historyResponse.json();
+
+      setStats(statsData);
+      setTransactions(historyData.predictions.slice(0, 5));
+      setChartTransactions(historyData.predictions);
+      setApiStatus("Online");
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return;
+      }
+
+      console.error("Dashboard error:", error);
+      setApiStatus("Offline");
+      setDashboardError(
+        "Unable to load dashboard data. Check that the FastAPI backend is running."
+      );
+    }
+
+    try {
+      if (controller.signal.aborted) return;
+
+      const casesResponse = await fetch(`${API_BASE_URL}/cases?limit=5`, {
+        signal: controller.signal,
+      });
+
+      if (!casesResponse.ok) {
+        throw new Error("Failed to fetch fraud cases");
+      }
+
+      const casesData: { count: number; cases: FraudCase[] } =
+        await casesResponse.json();
+
+      setFraudCases(casesData.cases);
+      setCasesError("");
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return;
+      }
+
+      console.error("Fraud cases error:", error);
+      setCasesError("Unable to load fraud cases. Please try again.");
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsRefreshing(false);
+      }
+    }
+  }
+
+  void loadInitialDashboard();
+
+  return () => controller.abort();
+}, []);
+
 
 
   const chartWidth = 760;
@@ -561,11 +641,11 @@ export default function Home() {
                     <tr
                       key={transaction.id}
                       onClick={() => {
-                        window.location.href = `/transaction/${transaction.id}`;
+                        router.push(`/transaction/${transaction.id}`);
                       }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
-                          window.location.href = `/transaction/${transaction.id}`;
+                          router.push(`/transaction/${transaction.id}`);
                         }
                       }}
                       tabIndex={0}

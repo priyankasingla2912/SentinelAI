@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Transaction = {
   id: number;
@@ -23,6 +24,7 @@ export default function HistoryPage() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const router = useRouter();
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -52,9 +54,7 @@ export default function HistoryPage() {
     fetchHistory();
   }, []);
 
-    useEffect(() => {
-    setCurrentPage(1);
-  }, [selectedRisk, selectedPrediction]);
+
 
 const filteredTransactions = transactions.filter((transaction) => {
     const riskMatches =
@@ -68,8 +68,9 @@ const filteredTransactions = transactions.filter((transaction) => {
     return riskMatches && predictionMatches;
   });
 
-  const totalPages = Math.ceil(
-  filteredTransactions.length / itemsPerPage
+  const totalPages = Math.max(
+  1,
+  Math.ceil(filteredTransactions.length / itemsPerPage)
 );
 
 const startIndex = (currentPage - 1) * itemsPerPage;
@@ -79,7 +80,7 @@ const paginatedTransactions = filteredTransactions.slice(
   startIndex + itemsPerPage
 );
 
-  
+
   const getRiskClass = (risk: string) => {
     switch (risk) {
       case "CRITICAL":
@@ -138,7 +139,10 @@ const paginatedTransactions = filteredTransactions.slice(
       <button
         key={risk}
         type="button"
-        onClick={() => setSelectedRisk(risk)}
+        onClick={() => {
+  setSelectedRisk(risk);
+  setCurrentPage(1);
+}}
         className={`rounded-lg px-3 py-2 text-xs font-medium transition ${
           selectedRisk === risk
             ? "bg-blue-600 text-white"
@@ -159,7 +163,10 @@ const paginatedTransactions = filteredTransactions.slice(
       <button
         key={prediction}
         type="button"
-        onClick={() => setSelectedPrediction(prediction)}
+        onClick={() => {
+          setSelectedPrediction(prediction);
+          setCurrentPage(1);
+        }}
         className={`rounded-lg px-3 py-2 text-xs font-medium transition ${
           selectedPrediction === prediction
             ? "bg-blue-600 text-white"
@@ -238,8 +245,7 @@ const paginatedTransactions = filteredTransactions.slice(
                   {paginatedTransactions.map((transaction) => (
                     <tr
                       key={transaction.id}
-                      onClick={() =>
-                        (window.location.href = `/transaction/${transaction.id}`)
+                      onClick={() => router.push(`/transaction/${transaction.id}`)
     }
                       className="cursor-pointer border-b border-slate-800 transition hover:bg-slate-800/60"
                     >

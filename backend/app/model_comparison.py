@@ -19,7 +19,10 @@ from imblearn.over_sampling import SMOTE
 # 1. Load Dataset
 # ==========================================
 
-df = pd.read_csv("../datasets/raw/creditcard.csv")
+from pathlib import Path
+
+DATASET_PATH = Path(__file__).resolve().parents[2] / "datasets" / "raw" / "creditcard.csv"
+df = pd.read_csv(DATASET_PATH)
 
 print("Dataset Loaded Successfully!")
 

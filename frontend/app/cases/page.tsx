@@ -52,9 +52,43 @@ export default function CasesPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadCases();
-  }, [loadCases]);
+ useEffect(() => {
+  const controller = new AbortController();
+
+  async function fetchInitialCases() {
+    try {
+      const response = await fetch(`${API_URL}/cases`, {
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Unable to load cases (${response.status})`);
+      }
+
+      const data = await response.json();
+      setCases(data.cases);
+      setError("");
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to SentinelAI."
+      );
+    } finally {
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
+    }
+  }
+
+  void fetchInitialCases();
+
+  return () => controller.abort();
+}, []);
 
   async function updateStatus(
     fraudCase: FraudCase,

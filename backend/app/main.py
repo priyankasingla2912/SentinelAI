@@ -3,6 +3,7 @@ import json
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from app.knowledge.graph_workflow import run_investigation
 from pathlib import Path
 import pandas as pd
 import joblib
@@ -555,3 +556,29 @@ def predict(transaction: Transaction):
         "top_risk_factors": top_factors,
         "recommended_action": recommended_action
     }
+
+
+
+@app.post("/investigate")
+def investigate(payload: dict):
+    """Run the LangGraph investigation workflow."""
+
+    required_fields = {
+        "prediction",
+        "risk_level",
+        "fraud_probability",
+        "top_risk_factors",
+    }
+
+    missing_fields = required_fields - payload.keys()
+
+    if missing_fields:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Missing required prediction fields",
+                "missing_fields": sorted(missing_fields),
+            },
+        )
+
+    return run_investigation(payload)
