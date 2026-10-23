@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from backend.app import database
+from app import database
 
 
 @pytest.fixture
