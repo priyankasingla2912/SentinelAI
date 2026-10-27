@@ -411,7 +411,9 @@ You can run SentinelAI locally using a Python virtual environment for the backen
 - Python 3.11
 - Node.js and npm
 - Git
-- The project's trained model file, available locally (the model is not included in Git)
+- The trained model artifact `models/fraud_random_forest.pkl` is required to run the backend and is not included in this repository. Obtain it from the project maintainer and place it at that path before starting the backend.
+- The fraud threshold is configured in `models/threshold.txt` and currently set to `0.60`.
+- GitHub Actions creates a temporary synthetic model for automated tests. It is not the trained model used for project evaluation.
 
 ### 1. Start the Backend
 
