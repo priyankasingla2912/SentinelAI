@@ -1,3 +1,4 @@
+
 # SentinelAI
 
 ## AI-Powered Fraud & Risk Intelligence Platform
@@ -400,32 +401,65 @@ The large training dataset and trained Random Forest model are intentionally exc
 
 ---
 
+
 ## Running the Project
 
-### Backend
+You can run SentinelAI locally using a Python virtual environment for the backend and npm for the frontend.
 
-Open a terminal and run:
+### Prerequisites
 
-    cd /Users/priyankabansal/Documents/Projects/SentinelAI/backend
-    source venv/bin/activate
-    uvicorn app.main:app --reload
+- Python 3.11
+- Node.js and npm
+- Git
+- The project's trained model file, available locally (the model is not included in Git)
 
-Backend:
+### 1. Start the Backend
 
-http://127.0.0.1:8000
+From the repository root:
 
-### Frontend
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-Open another terminal and run:
+The backend API will be available at:
 
-    cd /Users/priyankabansal/Documents/Projects/SentinelAI/frontend
-    npm run dev
+- API: http://127.0.0.1:8000
+- Interactive API documentation: http://127.0.0.1:8000/docs
+- Health check: http://127.0.0.1:8000/health
 
-Frontend:
+Keep this terminal running.
+
+**Note:** If you have already created the virtual environment, activate it and install any missing dependencies instead of recreating it.
+
+### 2. Start the Frontend
+
+Open a second terminal from the repository root:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the application at:
 
 http://localhost:3000
 
----
+Keep the frontend terminal running while using the application.
+
+### 3. Try the Application
+
+1. Open the Transaction Analyzer at http://localhost:3000/analyze.
+2. Load a legitimate or fraudulent sample transaction.
+3. Review the fraud probability, prediction, risk level, recommended action, and SHAP explanation.
+4. Visit the History page to review analyzed transactions.
+5. Explore the Dashboard and transaction details pages.
+
+The project is a demonstration prototype. It does not connect to a live banking network or execute real payment-blocking actions.
 
 ## Application Pages
 
