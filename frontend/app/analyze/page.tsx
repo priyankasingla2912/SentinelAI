@@ -46,7 +46,9 @@ interface InvestigationResult {
 export default function AnalyzePage() {
   const [amount, setAmount] = useState("");
   const [time, setTime] = useState("");
-  const [features, setFeatures] = useState<Record<string, string>>({});
+  const [features, setFeatures] = useState<Record<string, string>>(
+    Object.fromEntries(Array.from({ length: 28 }, (_, i) => [`V${i + 1}`, "0"]))
+  );
   const [showAdvancedFeatures, setShowAdvancedFeatures] = useState(false);
 
   const [result, setResult] = useState<PredictionResult | null>(null);
