@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { API_BASE_URL } from "@/lib/api";
 
-const API_URL = "http://127.0.0.1:8001";
+const API_URL = API_BASE_URL;
 
 type FraudCase = {
   case_id: number;

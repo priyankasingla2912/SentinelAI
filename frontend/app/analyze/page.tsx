@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { API_BASE_URL } from "@/lib/api";
 
 
 interface RiskFactor {
@@ -61,37 +62,38 @@ const [investigating, setInvestigating] = useState(false);
 const [investigationError, setInvestigationError] = useState("");
 
   const featureNames = Array.from({ length: 28 }, (_, i) => `V${i + 1}`);
-  const legitimateSample = {
-  Time: 50000,
-  Amount: 100,
-  V1: 0,
-  V2: 0,
-  V3: 0,
-  V4: 0,
-  V5: 0,
-  V6: 0,
-  V7: 0,
-  V8: 0,
-  V9: 0,
-  V10: 0,
-  V11: 0,
-  V12: 0,
-  V13: 0,
-  V14: 0,
-  V15: 0,
-  V16: 0,
-  V17: 0,
-  V18: 0,
-  V19: 0,
-  V20: 0,
-  V21: 0,
-  V22: 0,
-  V23: 0,
-  V24: 0,
-  V25: 0,
-  V26: 0,
-  V27: 0,
-  V28: 0,
+  
+const legitimateSample = {
+  Time: 0,
+  Amount: 149.62,
+  V1: -1.3598071336738,
+  V2: -0.0727811733098497,
+  V3: 2.53634673796914,
+  V4: 1.37815522427443,
+  V5: -0.338320769942518,
+  V6: 0.462387777762292,
+  V7: 0.239598554061257,
+  V8: 0.0986979012610507,
+  V9: 0.363786969978931,
+  V10: 0.0907941719789316,
+  V11: -0.551599533260813,
+  V12: -0.617800855762348,
+  V13: -0.991389847235408,
+  V14: -0.311169353699879,
+  V15: 1.46817697209427,
+  V16: -0.470400525259478,
+  V17: 0.207971241929242,
+  V18: 0.0257905801985591,
+  V19: 0.403992960255733,
+  V20: 0.251412098239705,
+  V21: -0.018306777944153,
+  V22: 0.277837575558899,
+  V23: -0.110473910188767,
+  V24: 0.0669280749146731,
+  V25: 0.128539358273528,
+  V26: -0.189114843888824,
+  V27: 0.133558376740387,
+  V28: -0.0210530534538215,
 };
 
 const fraudSample = {
@@ -154,8 +156,11 @@ const fraudSample = {
   setInvestigation(null);
 setInvestigationError("");
 };
-  const handleSubmit = async (event: React.FormEvent) => {
+  
+const handleSubmit = async (event: React.FormEvent) => {
+  event.preventDefault();
 
+  // Validate transaction amount and time
   if (amount.trim() === "" || time.trim() === "") {
     setError("Please enter both the transaction amount and transaction time.");
     return;
@@ -171,7 +176,22 @@ setInvestigationError("");
     return;
   }
 
-  event.preventDefault();
+  // Validate all 28 model features
+  const invalidFeature = featureNames.find((feature) => {
+    const value = features[feature];
+
+    return (
+      value === undefined ||
+      value.trim() === "" ||
+      !Number.isFinite(Number(value))
+    );
+  });
+
+  if (invalidFeature) {
+    setError(`Please enter a valid numeric value for ${invalidFeature}.`);
+    return;
+  }
+
 
   setLoading(true);
   setError("");
@@ -193,7 +213,7 @@ setInvestigationError("");
     console.log("Sending transaction:",transactionData);
 
     const response = await fetch(
-      "http://127.0.0.1:8001/predict",
+      `${API_BASE_URL}/predict`,
       {
         method: "POST",
         headers: {
@@ -240,7 +260,7 @@ const handleInvestigate = async () => {
     };
 
     const response = await fetch(
-      "http://127.0.0.1:8001/investigate",
+      `${API_BASE_URL}/investigate`,
       {
         method: "POST",
         headers: {
@@ -301,6 +321,20 @@ const handleInvestigate = async () => {
             <p className="mt-2 text-sm text-slate-400">
               Enter the basic transaction information below.
             </p>
+
+<div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+  <p className="text-sm font-semibold text-amber-300">
+    Demo and data-quality notice
+  </p>
+  <p className="mt-2 text-sm leading-6 text-slate-300">
+    For meaningful predictions, provide transaction features prepared
+    using the same preprocessing as the model's training data.
+    The default V1–V28 values are placeholders, not real transaction
+    evidence. Use the sample buttons to explore the demo. Do not use
+    placeholder-based predictions to make real financial decisions.
+  </p>
+</div>
+
 
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">

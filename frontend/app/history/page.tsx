@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { API_BASE_URL } from "@/lib/api";
 
 type Transaction = {
   id: number;
@@ -30,7 +31,7 @@ export default function HistoryPage() {
     const fetchHistory = async () => {
       try {
         const response = await fetch(
-          "http://127.0.0.1:8001/history?limit=50"
+          `${API_BASE_URL}/history?limit=50`
         );
 
         if (!response.ok) {

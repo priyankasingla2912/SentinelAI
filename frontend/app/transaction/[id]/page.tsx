@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { API_BASE_URL } from "@/lib/api";
 
 type ShapFactor = {
   feature: string;
@@ -35,7 +36,7 @@ export default function TransactionDetailsPage() {
     const fetchTransaction = async () => {
       try {
         const response = await fetch(
-          `http://127.0.0.1:8001/history/${id}`
+          `${API_BASE_URL}/history/${id}`
         );
 
         if (!response.ok) {

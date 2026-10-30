@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { API_BASE_URL } from "@/lib/api";
 
 type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
@@ -35,7 +36,6 @@ type FraudCase = {
   updated_at: string;
 };
 
-const API_BASE_URL = "http://127.0.0.1:8001";
 
 const initialStats: DashboardStats = {
   total_transactions: 0,
@@ -409,7 +409,7 @@ useEffect(() => {
                 viewBox={`0 0 ${chartWidth} ${chartHeight}`}
                 role="img"
                 aria-label="Scatter plot of transaction amount against fraud probability"
-                className="w-full min-w-[520px]"
+                className="w-full min-w-[600px]"
               >
                 {[0, 25, 50, 75, 100].map((value) => {
                   const y = getPointY(value / 100);
@@ -505,7 +505,7 @@ useEffect(() => {
                     key={transaction.id}
                     cx={getPointX(transaction.amount)}
                     cy={getPointY(transaction.fraud_probability)}
-                    r={5}
+                    r={3.5}
                     fill={
                       transaction.prediction === "FRAUD"
                         ? "#f87171"

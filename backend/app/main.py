@@ -1,5 +1,6 @@
 import json
-
+import requests
+import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -49,15 +50,81 @@ app.add_middleware(
 )
 
 # ==========================================
+
+# ==========================================
 # Load Saved Model
 # ==========================================
 
-
-
 BASE_DIR = Path(__file__).resolve().parents[2]
-MODEL_PATH = BASE_DIR / "models" / "fraud_random_forest.pkl"
-THRESHOLD_PATH = BASE_DIR / "models" / "threshold.txt"
 
+MODEL_PATH = Path(
+    os.getenv(
+        "MODEL_PATH",
+        str(BASE_DIR / "models" / "fraud_random_forest.pkl")
+    )
+)
+
+THRESHOLD_PATH = Path(
+    os.getenv(
+        "THRESHOLD_PATH",
+        str(BASE_DIR / "models" / "threshold.txt")
+    )
+)
+
+HF_TOKEN = os.getenv("HF_TOKEN")
+HF_REPO_ID = os.getenv(
+    "HF_REPO_ID",
+    "priyanka2912/sentinelai-fraud-model"
+)
+
+
+def download_hf_file(filename: str, destination: Path):
+    """Download a file from the private Hugging Face repository."""
+
+    if not HF_TOKEN:
+        raise RuntimeError(
+            f"{filename} is missing and HF_TOKEN is not configured."
+        )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    url = (
+        f"https://huggingface.co/{HF_REPO_ID}"
+        f"/resolve/main/{filename}"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}"
+    }
+
+    print(f"Downloading {filename} from Hugging Face...")
+
+    response = requests.get(
+        url,
+        headers=headers,
+        stream=True,
+        timeout=(15, 180)
+    )
+
+    response.raise_for_status()
+
+    with open(destination, "wb") as file:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                file.write(chunk)
+
+    print(f"{filename} downloaded successfully!")
+
+
+# Download model only if it is missing
+if not MODEL_PATH.exists():
+    download_hf_file("fraud_random_forest.pkl", MODEL_PATH)
+
+# Download threshold only if it is missing
+if not THRESHOLD_PATH.exists():
+    download_hf_file("threshold.txt", THRESHOLD_PATH)
+
+# Load saved model and threshold
 model = joblib.load(MODEL_PATH)
 
 with open(THRESHOLD_PATH, "r") as f:
