@@ -38,16 +38,23 @@ create_fraud_cases_table()
 # CORS Configuration
 # ==========================================
 
+
+# CORS Configuration
+# ==========================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "https://sentinel-ai-ten-zeta.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==========================================
 
 # ==========================================
 
