@@ -328,7 +328,7 @@ const handleInvestigate = async () => {
   </p>
   <p className="mt-2 text-sm leading-6 text-slate-300">
     For meaningful predictions, provide transaction features prepared
-    using the same preprocessing as the model's training data.
+    using the same preprocessing as the model&apos;s training data.
     The default V1–V28 values are placeholders, not real transaction
     evidence. Use the sample buttons to explore the demo. Do not use
     placeholder-based predictions to make real financial decisions.
