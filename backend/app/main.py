@@ -1,7 +1,13 @@
 import json
 import requests
 import os
-from fastapi import FastAPI, HTTPException, Query
+from datetime import datetime, timedelta, timezone
+from fastapi import FastAPI, HTTPException, Query, Depends, Request
+from sqlalchemy import select, insert, update, func
+from sqlalchemy.exc import IntegrityError
+from app.auth import get_current_user, require_permission
+from app.roles import Permission, Role, has_permission
+from app.security import verify_password, create_access_token, hash_password
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from app.knowledge.graph_workflow import run_investigation
@@ -19,8 +25,19 @@ from app.database import (
     get_fraud_cases,
     get_fraud_case_by_id,
     create_fraud_case,
-    update_fraud_case
+    update_fraud_case,
+    get_active_engine,
+    users,
+    audit_logs,
+    otp_verifications,
+    log_audit_event,
+)
 
+from app.otp_service import (
+    generate_otp,
+    hash_otp,
+    verify_otp_hash,
+    send_otp_email,
 )
 
 app = FastAPI(
@@ -203,6 +220,53 @@ class FraudCaseUpdate(BaseModel):
     analyst: str | None = Field(default=None, max_length=100)
     investigation_notes: str | None = Field(default=None, max_length=2000)
 
+
+# ==========================================
+# Authentication Request Models
+# ==========================================
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=150)
+    email: str = Field(
+        ...,
+        min_length=5,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    password: str = Field(..., min_length=12, max_length=128)
+
+
+class OTPVerifyRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+    otp: str = Field(..., pattern=r"^\d{6}$")
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+    otp: str = Field(..., pattern=r"^\d{6}$")
+    new_password: str = Field(..., min_length=12, max_length=128)
+
+
+class UserCreate(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+    full_name: str = Field(..., min_length=2, max_length=150)
+    password: str = Field(..., min_length=12, max_length=128)
+    role: Role
+
+
+class UserUpdate(BaseModel):
+    role: Role | None = None
+    is_active: bool | None = None
+
 # ==========================================
 # Home Endpoint
 # ==========================================
@@ -227,12 +291,663 @@ def health():
     return {
         "status": "healthy"
     }
+
+
+# ==========================================
+# Authentication - Login
+# ==========================================
+
+@app.post("/auth/login")
+def login(
+    credentials: LoginRequest,
+    request: Request,
+):
+    """Authenticate a user and return a JWT access token."""
+
+    invalid_credentials = HTTPException(
+        status_code=401,
+        detail="Invalid email or password.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    email = credentials.email.strip().lower()
+
+    with get_active_engine().connect() as connection:
+        user = connection.execute(
+            select(users).where(users.c.email == email)
+        ).mappings().first()
+
+    if not user or not user["is_active"]:
+        raise invalid_credentials
+
+    if not verify_password(
+        credentials.password,
+        user["password_hash"],
+    ):
+        raise invalid_credentials
+
+    access_token = create_access_token(
+        user_id=user["id"],
+        role=user["role"],
+    )
+
+    log_audit_event(
+        user_id=user["id"],
+        action="LOGIN_SUCCESS",
+        resource_type="authentication",
+        ip_address=(
+            request.client.host
+            if request.client
+            else None
+        ),
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "role": user["role"],
+        },
+    }
+
+
+@app.post("/auth/register")
+def register_user(data: RegisterRequest, request: Request):
+    """Start public registration by sending an email verification OTP."""
+    email = data.email.strip().lower()
+    full_name = data.full_name.strip()
+
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Full name is required.")
+
+    engine = get_active_engine()
+    now = datetime.now(timezone.utc)
+
+    with engine.begin() as connection:
+        existing_user = connection.execute(
+            select(users.c.id).where(users.c.email == email)
+        ).first()
+
+        if existing_user:
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email already exists.",
+            )
+
+        recent_otp = connection.execute(
+            select(otp_verifications.c.created_at)
+            .where(
+                otp_verifications.c.email == email,
+                otp_verifications.c.purpose == "REGISTER",
+                otp_verifications.c.is_used.is_(False),
+            )
+            .order_by(otp_verifications.c.created_at.desc())
+        ).first()
+
+        if recent_otp and recent_otp.created_at:
+            created_at = recent_otp.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if now - created_at < timedelta(seconds=60):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Please wait one minute before requesting another code.",
+                )
+
+        otp = generate_otp()
+        connection.execute(
+            insert(otp_verifications).values(
+                email=email,
+                full_name=full_name,
+                password_hash=hash_password(data.password),
+                purpose="REGISTER",
+                otp_hash=hash_otp(otp),
+                expires_at=now + timedelta(minutes=10),
+                attempts=0,
+                is_used=False,
+            )
+        )
+
+    try:
+        send_otp_email(email, otp, "REGISTER")
+    except Exception:
+        import logging
+        logging.exception("OTP email delivery failed")
+        with engine.begin() as connection:
+            connection.execute(
+                update(otp_verifications)
+                .where(
+                    otp_verifications.c.email == email,
+                    otp_verifications.c.purpose == "REGISTER",
+                    otp_verifications.c.is_used.is_(False),
+                )
+                .values(is_used=True)
+            )
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to send verification email. Please try again later.",
+        )
+
+    return {
+        "message": "Verification code sent. It expires in 10 minutes."
+    }
+
+
+@app.post("/auth/verify-otp")
+def verify_registration_otp(data: OTPVerifyRequest, request: Request):
+    """Verify registration OTP and activate a new VIEWER account."""
+    email = data.email.strip().lower()
+    now = datetime.now(timezone.utc)
+    engine = get_active_engine()
+    error = None
+    new_user_id = None
+
+    with engine.begin() as connection:
+        otp_record = connection.execute(
+            select(otp_verifications)
+            .where(
+                otp_verifications.c.email == email,
+                otp_verifications.c.purpose == "REGISTER",
+                otp_verifications.c.is_used.is_(False),
+            )
+            .order_by(otp_verifications.c.id.desc())
+        ).mappings().first()
+
+        if not otp_record:
+            error = (400, "No pending verification was found. Please register again.")
+        elif otp_record["attempts"] >= 5:
+            error = (429, "Too many incorrect attempts. Please register again.")
+        else:
+            expires_at = otp_record["expires_at"]
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+            if now >= expires_at:
+                connection.execute(
+                    update(otp_verifications)
+                    .where(otp_verifications.c.id == otp_record["id"])
+                    .values(is_used=True)
+                )
+                error = (400, "Verification code expired. Please register again.")
+            elif not verify_otp_hash(data.otp, otp_record["otp_hash"]):
+                connection.execute(
+                    update(otp_verifications)
+                    .where(otp_verifications.c.id == otp_record["id"])
+                    .values(attempts=otp_verifications.c.attempts + 1)
+                )
+                error = (400, "Incorrect verification code.")
+            else:
+                existing_user = connection.execute(
+                    select(users.c.id).where(users.c.email == email)
+                ).first()
+
+                if existing_user:
+                    connection.execute(
+                        update(otp_verifications)
+                        .where(otp_verifications.c.id == otp_record["id"])
+                        .values(is_used=True)
+                    )
+                    error = (409, "An account with this email already exists.")
+                else:
+                    connection.execute(
+                        insert(users).values(
+                            email=email,
+                            full_name=otp_record["full_name"],
+                            password_hash=otp_record["password_hash"],
+                            role=Role.VIEWER.value,
+                            is_active=True,
+                        )
+                    )
+                    connection.execute(
+                        update(otp_verifications)
+                        .where(otp_verifications.c.id == otp_record["id"])
+                        .values(is_used=True)
+                    )
+                    new_user = connection.execute(
+                        select(users.c.id).where(users.c.email == email)
+                    ).first()
+                    new_user_id = new_user[0] if new_user else None
+
+    if error:
+        raise HTTPException(status_code=error[0], detail=error[1])
+
+    if new_user_id is not None:
+        log_audit_event(
+            user_id=new_user_id,
+            action="USER_REGISTERED",
+            resource_type="user",
+            resource_id=new_user_id,
+            ip_address=request.client.host if request.client else None,
+        )
+
+    return {
+        "message": "Email verified. Your SentinelAI account is now active. Please log in.",
+        "email": email,
+        "role": Role.VIEWER.value,
+    }
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(data: ForgotPasswordRequest):
+    """Send a password-reset OTP without revealing whether an account exists."""
+    email = data.email.strip().lower()
+    engine = get_active_engine()
+    now = datetime.now(timezone.utc)
+    otp_to_send = None
+
+    with engine.begin() as connection:
+        user = connection.execute(
+            select(users.c.id).where(
+                users.c.email == email,
+                users.c.is_active.is_(True),
+            )
+        ).first()
+
+        if user:
+            recent_otp = connection.execute(
+                select(otp_verifications.c.created_at)
+                .where(
+                    otp_verifications.c.email == email,
+                    otp_verifications.c.purpose == "RESET",
+                    otp_verifications.c.is_used.is_(False),
+                )
+                .order_by(otp_verifications.c.created_at.desc())
+            ).first()
+
+            can_send = True
+            if recent_otp and recent_otp.created_at:
+                created_at = recent_otp.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                can_send = now - created_at >= timedelta(seconds=60)
+
+            if can_send:
+                otp_to_send = generate_otp()
+                connection.execute(
+                    insert(otp_verifications).values(
+                        email=email,
+                        full_name=None,
+                        password_hash=None,
+                        purpose="RESET",
+                        otp_hash=hash_otp(otp_to_send),
+                        expires_at=now + timedelta(minutes=10),
+                        attempts=0,
+                        is_used=False,
+                    )
+                )
+
+    if otp_to_send:
+        try:
+            send_otp_email(email, otp_to_send, "RESET")
+        except Exception:
+            import logging
+            logging.exception("OTP email delivery failed")
+
+            with engine.begin() as connection:
+                connection.execute(
+                    update(otp_verifications)
+                    .where(
+                        otp_verifications.c.email == email,
+                        otp_verifications.c.purpose == "RESET",
+                        otp_verifications.c.is_used.is_(False),
+                    )
+                    .values(is_used=True)
+                )
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to send the reset email. Please try again later.",
+            )
+
+    return {
+        "message": "If an active account exists for this email, a password-reset code will be sent."
+    }
+
+
+@app.post("/auth/reset-password")
+def reset_password(data: ResetPasswordRequest, request: Request):
+    """Verify a reset OTP and update the account password."""
+    email = data.email.strip().lower()
+    now = datetime.now(timezone.utc)
+    engine = get_active_engine()
+    error = None
+    reset_user_id = None
+
+    with engine.begin() as connection:
+        user = connection.execute(
+            select(users).where(
+                users.c.email == email,
+                users.c.is_active.is_(True),
+            )
+        ).mappings().first()
+
+        otp_record = connection.execute(
+            select(otp_verifications)
+            .where(
+                otp_verifications.c.email == email,
+                otp_verifications.c.purpose == "RESET",
+                otp_verifications.c.is_used.is_(False),
+            )
+            .order_by(otp_verifications.c.id.desc())
+        ).mappings().first()
+
+        if not user or not otp_record:
+            error = (400, "Invalid or expired password-reset code.")
+        elif otp_record["attempts"] >= 5:
+            error = (429, "Too many incorrect attempts. Request a new code.")
+        else:
+            expires_at = otp_record["expires_at"]
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+            if now >= expires_at:
+                connection.execute(
+                    update(otp_verifications)
+                    .where(otp_verifications.c.id == otp_record["id"])
+                    .values(is_used=True)
+                )
+                error = (400, "Password-reset code expired. Request a new code.")
+            elif not verify_otp_hash(data.otp, otp_record["otp_hash"]):
+                connection.execute(
+                    update(otp_verifications)
+                    .where(otp_verifications.c.id == otp_record["id"])
+                    .values(attempts=otp_verifications.c.attempts + 1)
+                )
+                error = (400, "Invalid or expired password-reset code.")
+            else:
+                connection.execute(
+                    update(users)
+                    .where(users.c.id == user["id"])
+                    .values(
+                        password_hash=hash_password(data.new_password),
+                        updated_at=now,
+                    )
+                )
+                connection.execute(
+                    update(otp_verifications)
+                    .where(otp_verifications.c.id == otp_record["id"])
+                    .values(is_used=True)
+                )
+                reset_user_id = user["id"]
+
+    if error:
+        raise HTTPException(status_code=error[0], detail=error[1])
+
+    if reset_user_id is not None:
+        log_audit_event(
+            user_id=reset_user_id,
+            action="PASSWORD_RESET",
+            resource_type="authentication",
+            ip_address=request.client.host if request.client else None,
+        )
+
+    return {
+        "message": "Password reset successfully. Please log in with your new password."
+    }
+
+
+@app.get("/auth/me")
+def get_me(current_user: dict = Depends(get_current_user)):
+    """Return the authenticated user's public profile."""
+    return {
+        "id": current_user["id"],
+        "email": current_user["email"],
+        "full_name": current_user["full_name"],
+        "role": current_user["role"],
+    }
+
+
+# ==========================================
+# Authentication - Admin User Management
+# ==========================================
+
+@app.post("/auth/users", status_code=201)
+def create_user(
+    payload: UserCreate,
+    request: Request,
+    current_user: dict = Depends(
+        require_permission(Permission.MANAGE_USERS)
+    ),
+):
+    """Allow Admins to create registered user accounts."""
+
+    email = payload.email.strip().lower()
+    full_name = payload.full_name.strip()
+
+    if not full_name:
+        raise HTTPException(
+            status_code=422,
+            detail="Full name cannot be empty.",
+        )
+
+    try:
+        with get_active_engine().begin() as connection:
+            existing_user = connection.execute(
+                select(users.c.id).where(users.c.email == email)
+            ).first()
+
+            if existing_user:
+                raise HTTPException(
+                    status_code=409,
+                    detail="An account with this email already exists.",
+                )
+
+            result = connection.execute(
+                insert(users).values(
+                    email=email,
+                    full_name=full_name,
+                    password_hash=hash_password(payload.password),
+                    role=payload.role.value,
+                    is_active=True,
+                )
+            )
+
+            user_id = result.inserted_primary_key[0]
+
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists.",
+        )
+
+    log_audit_event(
+        user_id=current_user["id"],
+        action="USER_CREATED",
+        resource_type="user",
+        resource_id=user_id,
+        ip_address=request.client.host if request.client else None,
+    )
+
+    return {
+        "message": "User created successfully.",
+        "user": {
+            "id": user_id,
+            "email": email,
+            "full_name": full_name,
+            "role": payload.role.value,
+            "is_active": True,
+        },
+    }
+
+
+# ==========================================
+# Authentication - List Users
+# ==========================================
+
+@app.get("/auth/users")
+def list_users(
+    current_user: dict = Depends(
+        require_permission(Permission.MANAGE_USERS)
+    ),
+):
+    """Allow Admins to view registered user accounts."""
+
+    with get_active_engine().connect() as connection:
+        rows = connection.execute(
+            select(
+                users.c.id,
+                users.c.email,
+                users.c.full_name,
+                users.c.role,
+                users.c.is_active,
+                users.c.created_at,
+            ).order_by(users.c.id.asc())
+        ).mappings().all()
+
+    return {
+        "users": [dict(row) for row in rows]
+    }
+
+
+# ==========================================
+# Authentication - Update User
+# ==========================================
+
+@app.put("/auth/users/{user_id}")
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    request: Request,
+    current_user: dict = Depends(
+        require_permission(Permission.MANAGE_USERS)
+    ),
+):
+    """Allow Admins to change user roles and account status."""
+
+    if payload.role is None and payload.is_active is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a role or account status to update.",
+        )
+
+    with get_active_engine().begin() as connection:
+        target_user = connection.execute(
+            select(users).where(users.c.id == user_id)
+        ).mappings().first()
+
+        if not target_user:
+            raise HTTPException(
+                status_code=404,
+                detail="User account not found.",
+            )
+
+        is_self = current_user["id"] == user_id
+
+        if is_self and (
+            (payload.role is not None and payload.role != Role.ADMIN)
+            or payload.is_active is False
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="You cannot demote or deactivate your own Admin account.",
+            )
+
+        removing_admin_access = (
+            target_user["role"] == Role.ADMIN
+            and target_user["is_active"]
+            and (
+                (payload.role is not None and payload.role != Role.ADMIN)
+                or payload.is_active is False
+            )
+        )
+
+        if removing_admin_access:
+            active_admin_count = connection.execute(
+                select(users.c.id).where(
+                    users.c.role == Role.ADMIN,
+                    users.c.is_active.is_(True),
+                )
+            ).fetchall()
+
+            if len(active_admin_count) <= 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The last active Admin account cannot be demoted or deactivated.",
+                )
+
+        changes = {}
+
+        if payload.role is not None:
+            changes["role"] = payload.role.value
+
+        if payload.is_active is not None:
+            changes["is_active"] = payload.is_active
+
+        connection.execute(
+            update(users)
+            .where(users.c.id == user_id)
+            .values(**changes, updated_at=func.now())
+        )
+
+        updated_user = connection.execute(
+            select(
+                users.c.id,
+                users.c.email,
+                users.c.full_name,
+                users.c.role,
+                users.c.is_active,
+                users.c.created_at,
+            ).where(users.c.id == user_id)
+        ).mappings().one()
+
+    log_audit_event(
+        user_id=current_user["id"],
+        action="USER_UPDATED",
+        resource_type="user",
+        resource_id=user_id,
+        ip_address=request.client.host if request.client else None,
+    )
+
+    return {
+        "message": "User account updated successfully.",
+        "user": dict(updated_user),
+    }
+
+
+# ==========================================
+# Authentication - Audit Logs
+# ==========================================
+
+@app.get("/auth/audit-logs")
+def list_audit_logs(
+    limit: int = Query(100, ge=1, le=500),
+    current_user: dict = Depends(
+        require_permission(Permission.VIEW_AUDIT_LOGS)
+    ),
+):
+    """Allow Admins and Senior Fraud Analysts to view audit logs."""
+
+    with get_active_engine().connect() as connection:
+        rows = connection.execute(
+            select(
+                audit_logs.c.id,
+                audit_logs.c.user_id,
+                audit_logs.c.action,
+                audit_logs.c.resource_type,
+                audit_logs.c.resource_id,
+                audit_logs.c.ip_address,
+                audit_logs.c.created_at,
+            )
+            .order_by(audit_logs.c.created_at.desc())
+            .limit(limit)
+        ).mappings().all()
+
+    return {
+        "audit_logs": [dict(row) for row in rows]
+    }
+
+
 # ==========================================
 # Prediction History Endpoint
 # ==========================================
 
 @app.get("/history")
-def history(limit: int = Query(20, ge=1, le=100)):
+def history(
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
     rows = get_predictions(limit)
 
     predictions = []
@@ -268,7 +983,10 @@ def history(limit: int = Query(20, ge=1, le=100)):
 # ==========================================
 
 @app.get("/history/{prediction_id}")
-def prediction_details(prediction_id: int):
+def prediction_details(
+    prediction_id: int,
+    current_user: dict = Depends(get_current_user),
+):
     row = get_prediction_by_id(prediction_id)
 
     if row is None:
@@ -301,7 +1019,8 @@ def prediction_details(prediction_id: int):
 # ==========================================
 
 @app.get("/stats")
-def stats():
+def stats(current_user: dict = Depends(require_permission(Permission.VIEW_DASHBOARDS))
+):
 
     return get_prediction_stats()
 
@@ -314,9 +1033,19 @@ def stats():
 
 @app.get("/cases")
 def list_fraud_cases(
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
 ):
-    rows = get_fraud_cases(limit)
+    analyst_email = (
+        current_user["email"]
+        if current_user["role"] == Role.FRAUD_ANALYST
+        else None
+    )
+
+    rows = get_fraud_cases(
+        limit,
+        analyst_email=analyst_email,
+    )
 
     cases = []
 
@@ -338,13 +1067,29 @@ def list_fraud_cases(
 
 
 @app.get("/cases/{case_id}")
-def fraud_case_details(case_id: int):
+def fraud_case_details(
+    case_id: int,
+    current_user: dict = Depends(get_current_user),
+):
     row = get_fraud_case_by_id(case_id)
 
     if row is None:
         raise HTTPException(
             status_code=404,
             detail="Fraud case not found"
+        )
+
+    if (
+        current_user["role"] == Role.FRAUD_ANALYST
+        and (
+            not row[3]
+            or row[3].strip().lower()
+            != current_user["email"].strip().lower()
+        )
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only access fraud cases assigned to you."
         )
 
     return {
@@ -359,7 +1104,17 @@ def fraud_case_details(case_id: int):
 
 
 @app.post("/cases", status_code=201)
-def create_fraud_case_endpoint(case: FraudCaseCreate):
+def create_fraud_case_endpoint(
+    case: FraudCaseCreate,
+    current_user: dict = Depends(require_permission(Permission.CREATE_CASES)),
+):
+    user_role = Role(current_user["role"])
+    if user_role == Role.VIEWER:
+        raise HTTPException(
+            status_code=403,
+            detail="Viewers cannot create fraud cases."
+        )
+
     prediction = get_prediction_by_id(case.prediction_id)
 
     if prediction is None:
@@ -368,9 +1123,38 @@ def create_fraud_case_endpoint(case: FraudCaseCreate):
             detail="Transaction not found"
         )
 
+    if user_role == Role.FRAUD_ANALYST:
+        assigned_analyst = current_user["email"]
+
+    elif user_role in {
+        Role.ADMIN,
+        Role.SENIOR_FRAUD_ANALYST,
+    }:
+        assigned_analyst = case.analyst
+
+        if assigned_analyst:
+            with get_active_engine().connect() as connection:
+                assigned_user = connection.execute(
+                    select(users.c.email).where(
+                        users.c.email == assigned_analyst,
+                        users.c.is_active.is_(True),
+                    )
+                ).first()
+
+            if assigned_user is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assigned analyst must be an active registered user."
+                )
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to create fraud cases."
+        )
+
     case_id = create_fraud_case(
         prediction_id=case.prediction_id,
-        analyst=case.analyst,
+        analyst=assigned_analyst,
         investigation_notes=case.investigation_notes
     )
 
@@ -390,8 +1174,29 @@ def create_fraud_case_endpoint(case: FraudCaseCreate):
 @app.put("/cases/{case_id}")
 def update_fraud_case_endpoint(
     case_id: int,
-    case: FraudCaseUpdate
+    case: FraudCaseUpdate,
+    current_user: dict = Depends(get_current_user),
 ):
+    user_role = Role(current_user["role"])
+
+    required_permission = (
+        Permission.UPDATE_ASSIGNED_CASES
+        if user_role == Role.FRAUD_ANALYST
+        else Permission.UPDATE_ALL_CASES
+    )
+
+    if not has_permission(current_user["role"], required_permission):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to update fraud cases."
+        )
+
+    if user_role == Role.VIEWER:
+        raise HTTPException(
+            status_code=403,
+            detail="Viewers cannot update fraud cases."
+        )
+
     existing_case = get_fraud_case_by_id(case_id)
 
     if existing_case is None:
@@ -399,7 +1204,26 @@ def update_fraud_case_endpoint(
             status_code=404,
             detail="Fraud case not found"
         )
+
     fields = case.model_fields_set
+    if user_role == Role.FRAUD_ANALYST:
+        assigned_email = existing_case[3]
+
+        if (
+            not assigned_email
+            or assigned_email.strip().lower()
+            != current_user["email"].strip().lower()
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only update fraud cases assigned to you."
+            )
+
+        if "analyst" in fields:
+            raise HTTPException(
+                status_code=403,
+                detail="Fraud Analysts cannot assign or reassign cases."
+            )
 
     allowed_statuses = {"NEW", "IN_PROGRESS", "RESOLVED"}
 
@@ -476,7 +1300,15 @@ def get_risk_level(probability):
 # ==========================================
 
 @app.post("/predict")
-def predict(transaction: Transaction):
+def predict(
+    transaction: Transaction,
+    current_user: dict = Depends(require_permission(Permission.CREATE_PREDICTIONS)),
+):
+    if current_user["role"] == Role.VIEWER:
+        raise HTTPException(
+            status_code=403,
+            detail="Viewers cannot create predictions."
+        )
 
     # Convert transaction to dictionary
     transaction_data = transaction.model_dump()
@@ -608,7 +1440,11 @@ def predict(transaction: Transaction):
         case_id = create_fraud_case(
             prediction_id=prediction_id,
             status="NEW",
-            analyst=None,
+            analyst=(
+                current_user["email"]
+                if current_user["role"] == Role.FRAUD_ANALYST
+                else None
+            ),
             investigation_notes=(
                 "Automatically created after a fraud prediction. "
                 "Review the transaction and investigate."
@@ -634,8 +1470,17 @@ def predict(transaction: Transaction):
 
 
 @app.post("/investigate")
-def investigate(payload: dict):
+def investigate(
+    payload: dict,
+    current_user: dict = Depends(require_permission(Permission.INVESTIGATE_FRAUD)),
+):
     """Run the LangGraph investigation workflow."""
+
+    if current_user["role"] == Role.VIEWER:
+        raise HTTPException(
+            status_code=403,
+            detail="Viewers cannot run fraud investigations."
+        )
 
     required_fields = {
         "prediction",

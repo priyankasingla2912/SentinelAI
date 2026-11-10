@@ -1,9 +1,25 @@
-
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.auth import get_current_user
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def authenticated_test_user():
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 1,
+        "email": "testadmin@sentinelai.local",
+        "full_name": "Test Admin",
+        "role": "ADMIN",
+        "is_active": True,
+    }
+
+    yield
+
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_investigate_endpoint_returns_report():

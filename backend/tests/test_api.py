@@ -1,12 +1,47 @@
 
 import pytest
 from fastapi.testclient import TestClient
-
+from app import database
 from app.main import app
+from app.auth import get_current_user
 from unittest.mock import patch
 
-
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def authenticated_test_user():
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 1,
+        "email": "testadmin@sentinelai.local",
+        "full_name": "Test Admin",
+        "role": "ADMIN",
+        "is_active": True,
+    }
+
+    database.create_auth_tables()
+
+    with database.get_active_engine().begin() as connection:
+        existing_user = connection.execute(
+            database.select(database.users).where(
+                database.users.c.email == "testanalyst@sentinelai.local"
+            )
+        ).first()
+
+        if not existing_user:
+            connection.execute(
+                database.users.insert().values(
+                    email="testanalyst@sentinelai.local",
+                    full_name="Test Analyst",
+                    password_hash="test-only-placeholder",
+                    role="FRAUD_ANALYST",
+                    is_active=True,
+                )
+            )
+
+    yield
+
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
@@ -182,7 +217,7 @@ def test_fraud_case_can_be_retrieved(valid_transaction):
         "/cases",
         json={
             "prediction_id": prediction_id,
-            "analyst": "Test Analyst",
+            "analyst": "testanalyst@sentinelai.local",
             "investigation_notes": "Automated API test.",
         },
     )
@@ -204,7 +239,7 @@ def test_fraud_case_can_be_retrieved(valid_transaction):
     assert retrieved_case["case_id"] == case_id
     assert retrieved_case["prediction_id"] == prediction_id
     assert retrieved_case["status"] == "NEW"
-    assert retrieved_case["analyst"] == "Test Analyst"
+    assert retrieved_case["analyst"] == "testanalyst@sentinelai.local"
     assert retrieved_case["investigation_notes"] == (
         "Automated API test."
     )
@@ -259,3 +294,335 @@ def test_predict_legitimate_does_not_create_case(valid_transaction):
     assert isinstance(data["prediction_id"], int)
     assert data["prediction_id"] > 0
     assert data["case_id"] is None
+
+
+def test_admin_can_update_fraud_case(valid_transaction):
+    prediction_response = client.post(
+        "/predict",
+        json=valid_transaction,
+    )
+    assert prediction_response.status_code == 200
+
+    prediction_id = prediction_response.json()["prediction_id"]
+
+    case_response = client.post(
+        "/cases",
+        json={
+            "prediction_id": prediction_id,
+            "analyst": "testanalyst@sentinelai.local",
+            "investigation_notes": "Initial investigation.",
+        },
+    )
+    assert case_response.status_code == 201
+
+    case_id = case_response.json()["case_id"]
+
+    update_response = client.put(
+        f"/cases/{case_id}",
+        json={
+            "status": "IN_PROGRESS",
+            "investigation_notes": "Administrator updated the investigation.",
+        },
+    )
+
+    assert update_response.status_code == 200
+
+    updated_case = update_response.json()
+    assert updated_case["case_id"] == case_id
+    assert updated_case["status"] == "IN_PROGRESS"
+    assert updated_case["investigation_notes"] == (
+        "Administrator updated the investigation."
+    )
+
+
+
+def test_fraud_analyst_can_update_assigned_case(valid_transaction):
+    prediction_response = client.post(
+        "/predict",
+        json=valid_transaction,
+    )
+    assert prediction_response.status_code == 200
+
+    case_response = client.post(
+        "/cases",
+        json={
+            "prediction_id": prediction_response.json()["prediction_id"],
+            "analyst": "testanalyst@sentinelai.local",
+            "investigation_notes": "Initial investigation.",
+        },
+    )
+    assert case_response.status_code == 201
+
+    case_id = case_response.json()["case_id"]
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 2,
+        "email": "testanalyst@sentinelai.local",
+        "full_name": "Test Analyst",
+        "role": "FRAUD_ANALYST",
+        "is_active": True,
+    }
+
+    response = client.put(
+        f"/cases/{case_id}",
+        json={
+            "status": "IN_PROGRESS",
+            "investigation_notes": "Analyst investigation updated.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "IN_PROGRESS"
+    assert response.json()["investigation_notes"] == (
+        "Analyst investigation updated."
+    )
+
+def test_fraud_analyst_cannot_update_another_analysts_case(valid_transaction):
+    prediction_response = client.post(
+        "/predict",
+        json=valid_transaction,
+    )
+    assert prediction_response.status_code == 200
+
+    case_response = client.post(
+        "/cases",
+        json={
+            "prediction_id": prediction_response.json()["prediction_id"],
+            "analyst": "testanalyst@sentinelai.local",
+            "investigation_notes": "Assigned to another analyst.",
+        },
+    )
+    assert case_response.status_code == 201
+
+    case_id = case_response.json()["case_id"]
+
+    # Authenticate as a different fraud analyst.
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 3,
+        "email": "anotheranalyst@sentinelai.local",
+        "full_name": "Another Analyst",
+        "role": "FRAUD_ANALYST",
+        "is_active": True,
+    }
+
+    response = client.put(
+        f"/cases/{case_id}",
+        json={
+            "status": "IN_PROGRESS",
+            "investigation_notes": "Unauthorized update attempt.",
+        },
+    )
+
+    assert response.status_code == 403
+def test_fraud_analyst_cannot_reassign_case(valid_transaction):
+    prediction_response = client.post(
+        "/predict",
+        json=valid_transaction,
+    )
+    assert prediction_response.status_code == 200
+
+    case_response = client.post(
+        "/cases",
+        json={
+            "prediction_id": prediction_response.json()["prediction_id"],
+            "analyst": "testanalyst@sentinelai.local",
+            "investigation_notes": "Initial investigation.",
+        },
+    )
+    assert case_response.status_code == 201
+
+    case_id = case_response.json()["case_id"]
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 2,
+        "email": "testanalyst@sentinelai.local",
+        "full_name": "Test Analyst",
+        "role": "FRAUD_ANALYST",
+        "is_active": True,
+    }
+
+    response = client.put(
+        f"/cases/{case_id}",
+        json={
+            "analyst": "anotheranalyst@sentinelai.local",
+        },
+    )
+
+    assert response.status_code == 403
+
+def test_viewer_cannot_create_fraud_case(valid_transaction):
+    prediction_response = client.post(
+        "/predict",
+        json=valid_transaction,
+    )
+    assert prediction_response.status_code == 200
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 4,
+        "email": "viewer@sentinelai.local",
+        "full_name": "Test Viewer",
+        "role": "VIEWER",
+        "is_active": True,
+    }
+
+    response = client.post(
+        "/cases",
+        json={
+            "prediction_id": prediction_response.json()["prediction_id"],
+            "investigation_notes": "Viewer creation attempt.",
+        },
+    )
+
+
+    assert response.status_code == 403
+
+def test_viewer_cannot_update_fraud_case(valid_transaction):
+    prediction_response = client.post(
+        "/predict",
+        json=valid_transaction,
+    )
+    assert prediction_response.status_code == 200
+
+    case_response = client.post(
+        "/cases",
+        json={
+            "prediction_id": prediction_response.json()["prediction_id"],
+            "analyst": "testanalyst@sentinelai.local",
+            "investigation_notes": "Initial investigation.",
+        },
+    )
+    assert case_response.status_code == 201
+
+    case_id = case_response.json()["case_id"]
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 4,
+        "email": "viewer@sentinelai.local",
+        "full_name": "Test Viewer",
+        "role": "VIEWER",
+        "is_active": True,
+    }
+
+    response = client.put(
+        f"/cases/{case_id}",
+        json={
+            "status": "RESOLVED",
+            "investigation_notes": "Viewer update attempt.",
+        },
+    )
+
+    assert response.status_code == 403
+def test_invalid_case_status_update_rejected(valid_transaction):
+    prediction_response = client.post(
+        "/predict",
+        json=valid_transaction,
+    )
+    assert prediction_response.status_code == 200
+
+    case_response = client.post(
+        "/cases",
+        json={
+            "prediction_id": prediction_response.json()["prediction_id"],
+            "analyst": "testanalyst@sentinelai.local",
+            "investigation_notes": "Initial investigation.",
+        },
+    )
+    assert case_response.status_code == 201
+
+    case_id = case_response.json()["case_id"]
+
+    response = client.put(
+        f"/cases/{case_id}",
+        json={"status": "INVALID_STATUS"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_investigate_endpoint_success():
+    payload = {
+        "prediction": "FRAUD",
+        "risk_level": "HIGH",
+        "fraud_probability": 0.95,
+        "top_risk_factors": [
+            {"feature": "V14", "shap_value": -0.8}
+        ],
+    }
+
+    expected_report = {
+        "prediction": "FRAUD",
+        "risk_level": "HIGH",
+        "requires_human_review": True,
+    }
+
+    with patch(
+        "app.main.run_investigation",
+        return_value=expected_report,
+    ) as mock_investigation:
+        response = client.post("/investigate", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == expected_report
+    mock_investigation.assert_called_once_with(payload)
+
+
+def test_investigate_endpoint_missing_fields():
+    response = client.post(
+        "/investigate",
+        json={"prediction": "FRAUD"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["message"] == (
+        "Missing required prediction fields"
+    )
+
+
+@pytest.mark.parametrize(
+    "role",
+    ["ADMIN", "SENIOR_FRAUD_ANALYST", "FRAUD_ANALYST"],
+)
+def test_authorized_roles_can_investigate(role):
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 1,
+        "email": "testuser@sentinelai.local",
+        "full_name": "Test User",
+        "role": role,
+        "is_active": True,
+    }
+
+    payload = {
+        "prediction": "FRAUD",
+        "risk_level": "HIGH",
+        "fraud_probability": 0.95,
+        "top_risk_factors": [],
+    }
+
+    with patch(
+        "app.main.run_investigation",
+        return_value={"requires_human_review": True},
+    ):
+        response = client.post("/investigate", json=payload)
+
+    assert response.status_code == 200
+
+
+def test_viewer_cannot_investigate():
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 4,
+        "email": "viewer@sentinelai.local",
+        "full_name": "Test Viewer",
+        "role": "VIEWER",
+        "is_active": True,
+    }
+
+    payload = {
+        "prediction": "FRAUD",
+        "risk_level": "HIGH",
+        "fraud_probability": 0.95,
+        "top_risk_factors": [],
+    }
+
+    response = client.post("/investigate", json=payload)
+
+    assert response.status_code == 403

@@ -28,6 +28,24 @@ export default function CasesPage() {
   const [editNotes, setEditNotes] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((user) => {
+        if (active) setIsAdmin(user?.role === "ADMIN");
+      })
+      .catch(() => {
+        if (active) setIsAdmin(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
 
   const loadCases = useCallback(async () => {
@@ -341,7 +359,7 @@ const filteredCases = cases.filter((fraudCase) => {
                     
                     
 <td>
-  {editingId === fraudCase.case_id ? (
+  {isAdmin && editingId === fraudCase.case_id ? (
     <input
       aria-label={`Analyst for case ${fraudCase.case_id}`}
       value={editAnalyst}
@@ -363,7 +381,7 @@ const filteredCases = cases.filter((fraudCase) => {
                       </span>
                     </td>
                    <td className="cases-notes">
-  {editingId === fraudCase.case_id ? (
+  {isAdmin && editingId === fraudCase.case_id ? (
     <textarea
       aria-label={`Investigation notes for case ${fraudCase.case_id}`}
       value={editNotes}
@@ -377,6 +395,8 @@ const filteredCases = cases.filter((fraudCase) => {
 </td>
                     <td>{fraudCase.updated_at}</td>
                     <td>
+                      {isAdmin ? (
+                      <>
                       <select
                         aria-label={`Update status for case ${fraudCase.case_id}`}
                         value={fraudCase.status}
@@ -425,6 +445,10 @@ const filteredCases = cases.filter((fraudCase) => {
     Edit details
   </button>
 )}
+                      </>
+                      ) : (
+                        <span className="cases-state">View only</span>
+                      )}
                     </td>
                   </tr>
                 ))}

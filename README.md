@@ -19,7 +19,7 @@ The current implementation includes:
 - Validated fraud classification threshold
 - SHAP explainability
 - FastAPI backend
-- SQLite database
+- PostgreSQL and SQLite database support
 - Next.js / React frontend
 - Transaction Analyzer
 - Fraud risk classification
@@ -309,8 +309,11 @@ This makes the model output more interpretable than presenting only a fraud prob
 - NumPy
 
 ### Database
+The platform supports both PostgreSQL and SQLite:
 
-- SQLite
+- **PostgreSQL:** Supported for production-oriented deployments; deployment security and readiness must be verified.
+- **SQLite:** Used for local development and isolated testing.
+- **SQLAlchemy:** Used for database connectivity and ORM operations.
 
 ### Development
 
@@ -323,84 +326,89 @@ This makes the model output more interpretable than presenting only a fraud prob
 
 ## Project Structure
 
-    SentinelAI/
-    |
-    +-- backend/
-    |   |
-    |   +-- app/
-    |   |   |
-    |   |   +-- config.py
-    |   |   +-- constants.py
-    |   |   +-- database.py
-    |   |   +-- eda.py
-    |   |   +-- fraud_engine.py
-    |   |   +-- improved_model.py
-    |   |   +-- main.py
-    |   |   +-- model_comparison.py
-    |   |   +-- proper_validation.py
-    |   |   +-- risk_scoring.py
-    |   |   +-- routes.py
-    |   |   +-- save_model.py
-    |   |   +-- shap_explanation.py
-    |   |   +-- smote_model.py
-    |   |   +-- test_database.py
-    |   |   +-- test_shap.py
-    |   |   +-- threshold_optimization.py
-    |   |   +-- train_model.py
-    |   |   +-- visualization.py
-    |   |
-    |   +-- requirements.txt
-    |
-    +-- datasets/
-    |   |
-    |   +-- processed/
-    |   +-- raw/
-    |
-    +-- docs/
-    |   |
-    |   +-- API_Documentation.md
-    |   +-- Architecture.md
-    |   +-- Database_Design.md
-    |   +-- Deployment_Guide.md
-    |   +-- PRD.md
-    |   +-- User_Guide.md
-    |
-    +-- frontend/
-    |   |
-    |   +-- app/
-    |   |   |
-    |   |   +-- analyze/
-    |   |   |   +-- page.tsx
-    |   |   |
-    |   |   +-- history/
-    |   |   |   +-- page.tsx
-    |   |   |
-    |   |   +-- transaction/
-    |   |       +-- [id]/
-    |   |           +-- page.tsx
-    |   |
-    |   +-- globals.css
-    |   +-- layout.tsx
-    |   +-- page.tsx
-    |   +-- package.json
-    |   +-- tsconfig.json
-    |
-    +-- models/
-    |   |
-    |   +-- threshold.txt
-    |
-    +-- research/
-    |   |
-    |   +-- Week1.md
-    |   +-- Week2.md
-    |
-    +-- .gitignore
-    +-- README.md
+```text
+SentinelAI/
+│
+├── backend/
+│   ├── app/
+│   │   ├── knowledge/
+│   │   │   ├── fraud_policies.json
+│   │   │   ├── graph_workflow.py
+│   │   │   ├── investigator.py
+│   │   │   └── retriever.py
+│   │   │
+│   │   ├── auth.py
+│   │   ├── config.py
+│   │   ├── constants.py
+│   │   ├── database.py
+│   │   ├── fraud_engine.py
+│   │   ├── main.py
+│   │   ├── otp_service.py
+│   │   ├── risk_scoring.py
+│   │   ├── roles.py
+│   │   ├── routes.py
+│   │   ├── security.py
+│   │   └── shap_explanation.py
+│   │
+│   ├── scripts/
+│   ├── tests/
+│   └── requirements.txt
+│
+├── datasets/
+│   ├── processed/
+│   └── raw/
+│
+├── docs/
+│   ├── API_Documentation.md
+│   ├── Architecture.md
+│   ├── Database_Design.md
+│   ├── Deployment_Guide.md
+│   ├── PRD.md
+│   ├── User_Guide.md
+│   ├── day5_completion_report.md
+│   ├── investigation_workflow_validation.md
+│   ├── model_evaluation.md
+│   ├── policy_retrieval_validation.md
+│   └── security_production_readiness_review.md
+│
+├── frontend/
+│   ├── app/
+│   │   ├── analyze/
+│   │   ├── api/
+│   │   ├── cases/
+│   │   │   └── [id]/
+│   │   ├── forgot-password/
+│   │   ├── history/
+│   │   ├── login/
+│   │   ├── register/
+│   │   ├── transaction/
+│   │   │   └── [id]/
+│   │   ├── users/
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   │
+│   ├── components/
+│   ├── lib/
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── models/
+│   └── threshold.txt
+│
+├── research/
+│   ├── Week1.md
+│   └── Week2.md
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+│
+├── .gitignore
+└── README.md
+```
 
-The large training dataset and trained Random Forest model are intentionally excluded from Git using .gitignore.
-
----
-
+**Note:** The large training dataset and trained Random Forest model are intentionally excluded from Git using `.gitignore`. GitHub Actions generates a temporary synthetic model for automated testing.
 
 ## Running the Project
 
@@ -467,16 +475,25 @@ The project is a demonstration prototype. It does not connect to a live banking 
 
 | Page | Route | Purpose |
 |---|---|---|
-| Dashboard | / | Monitor fraud and risk metrics |
-| Analyzer | /analyze | Analyze transactions |
-| History | /history | Review analyzed transactions |
-| Transaction Details | /transaction/{id} | Review individual prediction details |
-
----
+| Dashboard | `/` | Monitor fraud and risk metrics |
+| Analyzer | `/analyze` | Analyze transactions |
+| History | `/history` | Review analyzed transactions |
+| Transaction Details | `/transaction/{id}` | Review individual prediction details |
+| Case Management | `/cases` | View and manage fraud cases |
+| Case Details | `/cases/{id}` | Review individual fraud cases |
+| Login | `/login` | Authenticate users |
+| Registration | `/register` | Register new users |
+| Forgot Password | `/forgot-password` | Reset account password |
+| User Management | `/users` | Manage application users |
 
 ## Database
 
-SQLite is used to store analyzed transactions.
+SentinelAI supports PostgreSQL and SQLite for data persistence.
+
+- **PostgreSQL:** Supported for production-oriented deployments; deployment security and readiness must be verified.
+
+- **SQLite:** Used for local development and isolated testing.
+- **SQLAlchemy:** Provides database connectivity and ORM operations.
 
 Stored information includes:
 
@@ -531,29 +548,26 @@ Important limitations include:
 - The model is trained using a historical public credit card fraud dataset.
 - V1-V28 are anonymized features and are not directly interpretable as business attributes.
 - The system does not connect to a live banking transaction network.
-- The current application uses SQLite for local persistence.
+- SQLite is used for local development and testing; PostgreSQL is supported for production-oriented deployments.
 - The system does not currently execute real financial transaction blocking.
 - Model performance may change when applied to a different real-world transaction population.
 - The current application does not represent a production banking fraud infrastructure.
 
----
 
 ## Future Improvements
 
 Potential future improvements include:
 
 - Real-time transaction streaming
-- Production-grade database such as PostgreSQL
-- Authentication and role-based access
-- Fraud analyst case management
 - Model monitoring and drift detection
 - Automated model retraining
-- Real-time alerts
+- Real-time fraud alerts
 - Integration with banking or payment systems
-- RAG-based compliance knowledge retrieval
-- Agentic AI fraud analyst assistance
-- Cloud deployment
+- Semantic/vector-based compliance knowledge retrieval
+- Expanded multi-agent fraud investigation workflows
+- Production-grade cloud deployment
 - Production monitoring and observability
+- Security hardening and compliance validation
 
 ---
 
