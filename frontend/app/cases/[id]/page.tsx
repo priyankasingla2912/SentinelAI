@@ -410,7 +410,7 @@ useEffect(() => {
             </h2>
 
             <p className="mt-2 text-sm text-slate-400">
-              Changes are saved to the local SentinelAI database.
+              Changes are saved securely to SentinelAI.
             </p>
 
             <label
