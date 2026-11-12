@@ -31,6 +31,10 @@ The current implementation includes:
 - Dashboard
 - API status monitoring
 - Sample transaction testing
+- User authentication and role-based access control
+- OTP-based password reset
+- Fraud case management and investigation
+- Policy retrieval and investigation recommendations
 
 ---
 
@@ -97,7 +101,7 @@ The Analyzer also provides sample transactions for testing.
 
 ### 6. Transaction History
 
-Analyzed transactions are persisted in SQLite and can be viewed through the History page.
+Analyzed transactions are persisted in the configured database (SQLite or PostgreSQL) and can be viewed through the History page.
 
 History supports:
 
@@ -177,7 +181,7 @@ The Dashboard provides an overview of analyzed transactions, including:
                Recommended Action
                         |
                         v
-                 SQLite Database
+                 Configured DB
                         |
              +----------+----------+
              |          |          |
@@ -225,7 +229,7 @@ docs/Architecture.md
     SHAP Explanation
       |
       v
-    SQLite Database
+    Configured DB
       |
       +-------------+-------------+
       |             |             |
