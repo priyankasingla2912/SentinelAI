@@ -3,9 +3,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE_URL } from "@/lib/api";
-
-const API_URL = API_BASE_URL;
 
 type FraudCase = {
   case_id: number;
@@ -52,7 +49,7 @@ export default function CasesPage() {
     try {
       setError("");
 
-      const response = await fetch(`${API_URL}/cases`);
+      const response = await fetch(`/api/backend/cases`);
 
       if (!response.ok) {
         throw new Error(`Unable to load cases (${response.status})`);
@@ -76,7 +73,7 @@ export default function CasesPage() {
 
   async function fetchInitialCases() {
     try {
-      const response = await fetch(`${API_URL}/cases`, {
+      const response = await fetch(`/api/backend/cases`, {
         signal: controller.signal,
       });
 
@@ -119,7 +116,7 @@ export default function CasesPage() {
 
     try {
       const response = await fetch(
-        `${API_URL}/cases/${fraudCase.case_id}`,
+        `/api/backend/cases/${fraudCase.case_id}`,
         {
           method: "PUT",
           headers: {
@@ -161,7 +158,7 @@ async function saveCaseDetails(fraudCase: FraudCase) {
 
   try {
     const response = await fetch(
-      `${API_URL}/cases/${fraudCase.case_id}`,
+      `/api/backend/cases/${fraudCase.case_id}`,
       {
         method: "PUT",
         headers: {

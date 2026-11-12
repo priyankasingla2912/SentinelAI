@@ -3,9 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { API_BASE_URL } from "@/lib/api";
-
-const API_URL = API_BASE_URL;
 
 type FraudCase = {
   case_id: number;
@@ -93,7 +90,7 @@ export default function FraudCaseDetailsPage() {
     setMessage("");
 
     try {
-      const caseResponse = await fetch(`${API_URL}/cases/${caseId}`);
+      const caseResponse = await fetch(`/api/backend/cases/${caseId}`);
       const caseData = await caseResponse.json();
 
       if (!caseResponse.ok) {
@@ -112,7 +109,7 @@ export default function FraudCaseDetailsPage() {
       // A case ID and a prediction ID are different.
       // Use prediction_id to load the linked transaction.
       const transactionResponse = await fetch(
-        `${API_URL}/history/${loadedCase.prediction_id}`
+        `/api/backend/history/${loadedCase.prediction_id}`
       );
 
       const transactionData = await transactionResponse.json();
@@ -152,7 +149,7 @@ useEffect(() => {
     setMessage("");
 
     try {
-      const caseResponse = await fetch(`${API_URL}/cases/${caseId}`, {
+      const caseResponse = await fetch(`/api/backend/cases/${caseId}`, {
         signal: controller.signal,
       });
       const caseData = await caseResponse.json();
@@ -171,7 +168,7 @@ useEffect(() => {
       setNotes(loadedCase.investigation_notes ?? "");
 
       const transactionResponse = await fetch(
-        `${API_URL}/history/${loadedCase.prediction_id}`,
+        `/api/backend/history/${loadedCase.prediction_id}`,
         { signal: controller.signal }
       );
       const transactionData = await transactionResponse.json();
@@ -216,7 +213,7 @@ useEffect(() => {
 
     try {
       const response = await fetch(
-        `${API_URL}/cases/${fraudCase.case_id}`,
+        `/api/backend/cases/${fraudCase.case_id}`,
         {
           method: "PUT",
           headers: {
